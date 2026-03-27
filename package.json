@@ -1,0 +1,12 @@
+{
+  "dependencies": {
+    "@supabase/supabase-js": "^2.97.0",
+    "firebase": "^12.9.0",
+    "firebase-admin": "^13.6.1",
+    "firebase-functions": "^7.0.5",
+    "lucide-react": "^0.577.0"
+  },
+  "devDependencies": {
+    "@types/google.maps": "^3.58.1"
+  }
+}
