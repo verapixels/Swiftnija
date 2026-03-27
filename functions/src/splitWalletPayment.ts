@@ -228,30 +228,66 @@ export const riderWalletWithdraw = onCall(
   }
 );
 
-
 // ─────────────────────────────────────────────────────────────────────────────
-// CREATE RIDER PAYSTACK RECIPIENT
+// CREATE RIDER PAYSTACK SUBACCOUNT + RECIPIENT
 // ─────────────────────────────────────────────────────────────────────────────
 export const createRiderPaystackRecipient = onCall(
-  {region: "us-central1", enforceAppCheck: false, secrets: ["PAYSTACK_SECRET_KEY"]},
+  { region: "us-central1", enforceAppCheck: false, secrets: ["PAYSTACK_SECRET_KEY"] },
   async (request) => {
     const riderId = request.auth?.uid;
     if (!riderId) throw new HttpsError("unauthenticated", "Must be signed in");
 
-    const {account_number, bank_code, account_name, bank_name} = request.data as {
+    const { account_number, bank_code, account_name, bank_name } = request.data as {
       account_number: string;
       bank_code: string;
       account_name: string;
       bank_name: string;
     };
 
-    if (!account_number || !bank_code || !account_name) {
-      throw new HttpsError("invalid-argument", "account_number, bank_code, account_name required");
+    if (!account_number || !bank_code || !account_name || !bank_name) {
+      throw new HttpsError("invalid-argument", "account_number, bank_code, account_name, bank_name all required");
     }
 
     const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY;
+    if (!PAYSTACK_SECRET) throw new HttpsError("internal", "Paystack secret key not configured");
 
-    const res = await fetch("https://api.paystack.co/transferrecipient", {
+    // ── Load rider name for subaccount business_name ───────────────────────
+    const riderSnap = await db.collection("riders").doc(riderId).get();
+    if (!riderSnap.exists) throw new HttpsError("not-found", "Rider not found");
+    const rider = riderSnap.data()!;
+    const fullName = rider.fullName ?? `${rider.firstName ?? ""} ${rider.lastName ?? ""}`.trim();
+
+    // ── 1. Create Paystack subaccount ──────────────────────────────────────
+    // Stored for future Paystack card-payment splits
+    const subRes = await fetch("https://api.paystack.co/subaccount", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${PAYSTACK_SECRET}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        business_name: `${fullName} (SwiftNija Rider)`,
+        settlement_bank: bank_code,
+        account_number,
+        percentage_charge: 0,
+        primary_contact_name: fullName,
+        primary_contact_phone: rider.phone ?? "",
+      }),
+    });
+
+    const subData = await subRes.json() as {
+      status: boolean;
+      message: string;
+      data: { subaccount_code: string };
+    };
+
+    if (!subData.status) {
+      throw new HttpsError("internal", `Paystack subaccount error: ${subData.message}`);
+    }
+
+    // ── 2. Create transfer recipient ───────────────────────────────────────
+    // Used by riderWalletWithdraw for manual bank transfers
+    const recRes = await fetch("https://api.paystack.co/transferrecipient", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${PAYSTACK_SECRET}`,
@@ -266,20 +302,32 @@ export const createRiderPaystackRecipient = onCall(
       }),
     });
 
-    const data = await res.json() as {status: boolean; data: {recipient_code: string}};
-    if (!data.status) {
-      throw new HttpsError("internal", "Failed to create Paystack recipient");
+    const recData = await recRes.json() as {
+      status: boolean;
+      message: string;
+      data: { recipient_code: string };
+    };
+
+    if (!recData.status) {
+      throw new HttpsError("internal", `Paystack recipient error: ${recData.message}`);
     }
 
+    // ── 3. Save both codes — full overwrite ────────────────────────────────
     await db.collection("riderBankAccounts").doc(riderId).set({
+      riderId,
       account_number,
       bank_code,
       account_name,
       bank_name,
-      recipient_code: data.data.recipient_code,
+      subaccount_code: subData.data.subaccount_code,
+      recipient_code: recData.data.recipient_code,
       linkedAt: FieldValue.serverTimestamp(),
     });
 
-    return {success: true, recipient_code: data.data.recipient_code};
+    return {
+      success: true,
+      subaccount_code: subData.data.subaccount_code,
+      recipient_code: recData.data.recipient_code,
+    };
   }
 );
