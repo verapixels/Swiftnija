@@ -87,10 +87,10 @@ export const vendorWalletWithdraw = onCall(
     const balance = walletSnap.exists ? (walletSnap.data()!.balance ?? 0) : 0;
     if (balance < amount) throw new HttpsError("failed-precondition", `Insufficient balance. Have ₦${balance.toFixed(2)}`);
 
-  const vendorSnap = await db.collection("vendors").doc(vendorId).get();
-const bank = vendorSnap.data()?.bankAccount;
-if (!bank) throw new HttpsError("failed-precondition", "No bank account linked");
-if (!bank.recipient_code) throw new HttpsError("failed-precondition", "Bank account not fully set up");
+    const vendorSnap = await db.collection("vendors").doc(vendorId).get();
+    const bank = vendorSnap.data()?.bankAccount;
+    if (!bank) throw new HttpsError("failed-precondition", "No bank account linked");
+    if (!bank.recipient_code) throw new HttpsError("failed-precondition", "Bank account not fully set up");
 
     const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY;
     const transferRes = await fetch("https://api.paystack.co/transfer", {
@@ -137,10 +137,10 @@ export const vendorSplitWalletWithdraw = onCall(
     const balance = walletSnap.exists ? (walletSnap.data()!.balance ?? 0) : 0;
     if (balance < amount) throw new HttpsError("failed-precondition", `Insufficient balance. Have ₦${balance.toFixed(2)}`);
 
-   const vendorSnap = await db.collection("vendors").doc(vendorId).get();
-const bank = vendorSnap.data()?.bankAccount;
-if (!bank) throw new HttpsError("failed-precondition", "No bank account linked");
-if (!bank.recipient_code) throw new HttpsError("failed-precondition", "Bank account not fully set up");
+    const vendorSnap = await db.collection("vendors").doc(vendorId).get();
+    const bank = vendorSnap.data()?.bankAccount;
+    if (!bank) throw new HttpsError("failed-precondition", "No bank account linked");
+    if (!bank.recipient_code) throw new HttpsError("failed-precondition", "Bank account not fully set up");
 
     const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY;
     const transferRes = await fetch("https://api.paystack.co/transfer", {
@@ -148,7 +148,7 @@ if (!bank.recipient_code) throw new HttpsError("failed-precondition", "Bank acco
       headers: {"Authorization": `Bearer ${PAYSTACK_SECRET}`, "Content-Type": "application/json"},
       body: JSON.stringify({
         source: "balance",
-        amount: Math.round(amount * 100), 
+        amount: Math.round(amount * 100),
         recipient: bank.recipient_code,
         reason: "SwiftNija vendor wallet withdrawal",
       }),
