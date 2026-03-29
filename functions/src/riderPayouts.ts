@@ -2,8 +2,8 @@
 // functions/src/riderPayouts.ts
 // ✅ CREATE this as a NEW file — does not exist yet
 
-import { onCall, HttpsError } from "firebase-functions/v2/https";
-import { getFirestore, FieldValue } from "firebase-admin/firestore";
+import {onCall, HttpsError} from "firebase-functions/v2/https";
+import {getFirestore, FieldValue} from "firebase-admin/firestore";
 
 const db = getFirestore();
 
@@ -11,12 +11,12 @@ const db = getFirestore();
 // Rider withdraws from their WALLET tab (riderSplitWallets collection).
 // The existing riderWalletWithdraw handles the Paystack tab — keep that as is.
 export const riderSplitWalletWithdraw = onCall(
-  { region: "us-central1", enforceAppCheck: false, secrets: ["PAYSTACK_SECRET_KEY"] },
+  {region: "us-central1", enforceAppCheck: false, secrets: ["PAYSTACK_SECRET_KEY"]},
   async (request) => {
     const riderId = request.auth?.uid;
     if (!riderId) throw new HttpsError("unauthenticated", "Must be signed in");
 
-    const { amount } = request.data as { amount: number };
+    const {amount} = request.data as { amount: number };
     if (!amount || amount < 100) throw new HttpsError("invalid-argument", "Minimum withdrawal is ₦100");
 
     const walletRef = db.collection("riderSplitWallets").doc(riderId);
@@ -32,7 +32,7 @@ export const riderSplitWalletWithdraw = onCall(
     const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY;
     const transferRes = await fetch("https://api.paystack.co/transfer", {
       method: "POST",
-      headers: { "Authorization": `Bearer ${PAYSTACK_SECRET}`, "Content-Type": "application/json" },
+      headers: {"Authorization": `Bearer ${PAYSTACK_SECRET}`, "Content-Type": "application/json"},
       body: JSON.stringify({
         source: "balance",
         amount: Math.round(amount * 100),
@@ -45,7 +45,7 @@ export const riderSplitWalletWithdraw = onCall(
 
     const batch = db.batch();
     const now = FieldValue.serverTimestamp();
-    batch.update(walletRef, { balance: FieldValue.increment(-amount) });
+    batch.update(walletRef, {balance: FieldValue.increment(-amount)});
     const txRef = db.collection("riderSplitWalletTransactions").doc();
     batch.set(txRef, {
       riderId, type: "debit", amount,
@@ -54,6 +54,6 @@ export const riderSplitWalletWithdraw = onCall(
     });
     await batch.commit();
 
-    return { success: true, newBalance: balance - amount, transferCode: transferData.data.transfer_code };
+    return {success: true, newBalance: balance - amount, transferCode: transferData.data.transfer_code};
   }
 );

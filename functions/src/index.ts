@@ -1365,43 +1365,43 @@ export const updateOrderStatus = onCall({cors: CORS_ORIGINS}, async (request) =>
         const now2 = admin.firestore.FieldValue.serverTimestamp();
         const batch2 = db.batch();
 
-          
-if (riderId && riderAmount2 > 0) {
-  // ── Credit riderSplitWallets (new Wallet tab) ──
-  const riderSplitWalletRef = db.collection("riderSplitWallets").doc(riderId);
-  batch2.set(riderSplitWalletRef, {
-    balance: admin.firestore.FieldValue.increment(riderAmount2),
-    riderId,
-  }, { merge: true });
- 
-  const riderSplitTxRef = db.collection("riderSplitWalletTransactions").doc();
-  batch2.set(riderSplitTxRef, {
-    riderId,
-    type: "credit",
-    amount: riderAmount2,
-    orderId,
-    desc: `Delivery split — ${orderData2.orderNumber ?? orderId.slice(-8).toUpperCase()}`,
-    source: "wallet_split",
-    createdAt: now2,
-  });
- 
-  // ── Also credit riderWallets (existing Paystack tab — keep this) ──
-  const riderWalletRef2 = db.collection("riderWallets").doc(riderId);
-  batch2.set(riderWalletRef2, {
-    balance: admin.firestore.FieldValue.increment(riderAmount2),
-  }, { merge: true });
- 
-  const riderTxRef = db.collection("riderWalletTransactions").doc();
-  batch2.set(riderTxRef, {
-    riderId,
-    type: "credit",
-    amount: riderAmount2,
-    orderId,
-    desc: `Delivery fee — ${orderData2.orderNumber ?? orderId.slice(-8).toUpperCase()}`,
-    createdAt: now2,
-  });
-}
- 
+
+        if (riderId && riderAmount2 > 0) {
+          // ── Credit riderSplitWallets (new Wallet tab) ──
+          const riderSplitWalletRef = db.collection("riderSplitWallets").doc(riderId);
+          batch2.set(riderSplitWalletRef, {
+            balance: admin.firestore.FieldValue.increment(riderAmount2),
+            riderId,
+          }, {merge: true});
+
+          const riderSplitTxRef = db.collection("riderSplitWalletTransactions").doc();
+          batch2.set(riderSplitTxRef, {
+            riderId,
+            type: "credit",
+            amount: riderAmount2,
+            orderId,
+            desc: `Delivery split — ${orderData2.orderNumber ?? orderId.slice(-8).toUpperCase()}`,
+            source: "wallet_split",
+            createdAt: now2,
+          });
+
+          // ── Also credit riderWallets (existing Paystack tab — keep this) ──
+          const riderWalletRef2 = db.collection("riderWallets").doc(riderId);
+          batch2.set(riderWalletRef2, {
+            balance: admin.firestore.FieldValue.increment(riderAmount2),
+          }, {merge: true});
+
+          const riderTxRef = db.collection("riderWalletTransactions").doc();
+          batch2.set(riderTxRef, {
+            riderId,
+            type: "credit",
+            amount: riderAmount2,
+            orderId,
+            desc: `Delivery fee — ${orderData2.orderNumber ?? orderId.slice(-8).toUpperCase()}`,
+            createdAt: now2,
+          });
+        }
+
 
         batch2.update(orderRef, {
           creditsDistributed: true,
@@ -2545,6 +2545,6 @@ export const reassignStuckOrders = onSchedule("every 2 minutes", async () => {
 });
 
 export * from "./splitWalletPayment";
- export * from "./vendorPayouts";
-  export * from "./riderPayouts";
-  export * from "./adminPayouts";
+export * from "./vendorPayouts";
+export * from "./riderPayouts";
+export * from "./adminPayouts";

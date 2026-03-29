@@ -2,8 +2,8 @@
 // functions/src/vendorPayouts.ts
 // ✅ CREATE this as a NEW file — does not exist yet
 
-import { onCall, HttpsError } from "firebase-functions/v2/https";
-import { getFirestore, FieldValue } from "firebase-admin/firestore";
+import {onCall, HttpsError} from "firebase-functions/v2/https";
+import {getFirestore, FieldValue} from "firebase-admin/firestore";
 
 const db = getFirestore();
 
@@ -11,12 +11,12 @@ const db = getFirestore();
 // Called when vendor links their bank account.
 // Creates Paystack subaccount + transfer recipient, saves to vendorBankAccounts.
 export const createVendorPaystackRecipient = onCall(
-  { region: "us-central1", enforceAppCheck: false, secrets: ["PAYSTACK_SECRET_KEY"] },
+  {region: "us-central1", enforceAppCheck: false, secrets: ["PAYSTACK_SECRET_KEY"]},
   async (request) => {
     const vendorId = request.auth?.uid;
     if (!vendorId) throw new HttpsError("unauthenticated", "Must be signed in");
 
-    const { account_number, bank_code, account_name, bank_name } = request.data as {
+    const {account_number, bank_code, account_name, bank_name} = request.data as {
       account_number: string; bank_code: string; account_name: string; bank_name: string;
     };
     if (!account_number || !bank_code || !account_name || !bank_name) {
@@ -34,7 +34,7 @@ export const createVendorPaystackRecipient = onCall(
     // Create Paystack subaccount (for card payment splits)
     const subRes = await fetch("https://api.paystack.co/subaccount", {
       method: "POST",
-      headers: { "Authorization": `Bearer ${PAYSTACK_SECRET}`, "Content-Type": "application/json" },
+      headers: {"Authorization": `Bearer ${PAYSTACK_SECRET}`, "Content-Type": "application/json"},
       body: JSON.stringify({
         business_name: businessName,
         settlement_bank: bank_code,
@@ -49,8 +49,8 @@ export const createVendorPaystackRecipient = onCall(
     // Create transfer recipient (for manual withdrawals)
     const recRes = await fetch("https://api.paystack.co/transferrecipient", {
       method: "POST",
-      headers: { "Authorization": `Bearer ${PAYSTACK_SECRET}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ type: "nuban", name: account_name, account_number, bank_code, currency: "NGN" }),
+      headers: {"Authorization": `Bearer ${PAYSTACK_SECRET}`, "Content-Type": "application/json"},
+      body: JSON.stringify({type: "nuban", name: account_name, account_number, bank_code, currency: "NGN"}),
     });
     const recData = await recRes.json() as { status: boolean; message: string; data: { recipient_code: string } };
     if (!recData.status) throw new HttpsError("internal", `Paystack recipient error: ${recData.message}`);
@@ -74,12 +74,12 @@ export const createVendorPaystackRecipient = onCall(
 // ─── vendorWalletWithdraw ─────────────────────────────────────────────────────
 // Vendor withdraws from their PAYSTACK tab (vendorWallets collection).
 export const vendorWalletWithdraw = onCall(
-  { region: "us-central1", enforceAppCheck: false, secrets: ["PAYSTACK_SECRET_KEY"] },
+  {region: "us-central1", enforceAppCheck: false, secrets: ["PAYSTACK_SECRET_KEY"]},
   async (request) => {
     const vendorId = request.auth?.uid;
     if (!vendorId) throw new HttpsError("unauthenticated", "Must be signed in");
 
-    const { amount } = request.data as { amount: number };
+    const {amount} = request.data as { amount: number };
     if (!amount || amount < 100) throw new HttpsError("invalid-argument", "Minimum withdrawal is ₦100");
 
     const walletRef = db.collection("vendorWallets").doc(vendorId);
@@ -95,7 +95,7 @@ export const vendorWalletWithdraw = onCall(
     const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY;
     const transferRes = await fetch("https://api.paystack.co/transfer", {
       method: "POST",
-      headers: { "Authorization": `Bearer ${PAYSTACK_SECRET}`, "Content-Type": "application/json" },
+      headers: {"Authorization": `Bearer ${PAYSTACK_SECRET}`, "Content-Type": "application/json"},
       body: JSON.stringify({
         source: "balance",
         amount: Math.round(amount * 100),
@@ -108,7 +108,7 @@ export const vendorWalletWithdraw = onCall(
 
     const batch = db.batch();
     const now = FieldValue.serverTimestamp();
-    batch.update(walletRef, { balance: FieldValue.increment(-amount) });
+    batch.update(walletRef, {balance: FieldValue.increment(-amount)});
     const txRef = db.collection("vendorWalletTransactions").doc();
     batch.set(txRef, {
       vendorId, type: "debit", amount,
@@ -117,19 +117,19 @@ export const vendorWalletWithdraw = onCall(
     });
     await batch.commit();
 
-    return { success: true, newBalance: balance - amount, transferCode: transferData.data.transfer_code };
+    return {success: true, newBalance: balance - amount, transferCode: transferData.data.transfer_code};
   }
 );
 
 // ─── vendorSplitWalletWithdraw ────────────────────────────────────────────────
 // Vendor withdraws from their WALLET tab (vendorSplitWallets collection).
 export const vendorSplitWalletWithdraw = onCall(
-  { region: "us-central1", enforceAppCheck: false, secrets: ["PAYSTACK_SECRET_KEY"] },
+  {region: "us-central1", enforceAppCheck: false, secrets: ["PAYSTACK_SECRET_KEY"]},
   async (request) => {
     const vendorId = request.auth?.uid;
     if (!vendorId) throw new HttpsError("unauthenticated", "Must be signed in");
 
-    const { amount } = request.data as { amount: number };
+    const {amount} = request.data as { amount: number };
     if (!amount || amount < 100) throw new HttpsError("invalid-argument", "Minimum withdrawal is ₦100");
 
     const walletRef = db.collection("vendorSplitWallets").doc(vendorId);
@@ -145,7 +145,7 @@ export const vendorSplitWalletWithdraw = onCall(
     const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY;
     const transferRes = await fetch("https://api.paystack.co/transfer", {
       method: "POST",
-      headers: { "Authorization": `Bearer ${PAYSTACK_SECRET}`, "Content-Type": "application/json" },
+      headers: {"Authorization": `Bearer ${PAYSTACK_SECRET}`, "Content-Type": "application/json"},
       body: JSON.stringify({
         source: "balance",
         amount: Math.round(amount * 100),
@@ -158,7 +158,7 @@ export const vendorSplitWalletWithdraw = onCall(
 
     const batch = db.batch();
     const now = FieldValue.serverTimestamp();
-    batch.update(walletRef, { balance: FieldValue.increment(-amount) });
+    batch.update(walletRef, {balance: FieldValue.increment(-amount)});
     const txRef = db.collection("vendorSplitWalletTransactions").doc();
     batch.set(txRef, {
       vendorId, type: "debit", amount,
@@ -167,6 +167,6 @@ export const vendorSplitWalletWithdraw = onCall(
     });
     await batch.commit();
 
-    return { success: true, newBalance: balance - amount, transferCode: transferData.data.transfer_code };
+    return {success: true, newBalance: balance - amount, transferCode: transferData.data.transfer_code};
   }
 );
