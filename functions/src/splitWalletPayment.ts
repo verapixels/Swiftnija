@@ -1,7 +1,4 @@
 /* eslint-disable camelcase */
-// functions/src/splitWalletPayment.ts
-// ✅ REPLACE your entire existing splitWalletPayment.ts with this file
-
 import {onCall, HttpsError} from "firebase-functions/v2/https";
 import {getFirestore, FieldValue} from "firebase-admin/firestore";
 
@@ -59,29 +56,27 @@ export const splitWalletPayment = onCall(
     // Debit user wallet
     batch.update(walletRef, {balance: FieldValue.increment(-totalCharge)});
 
-    // Credit vendor to BOTH vendorWallets (Paystack tab) AND vendorSplitWallets (Wallet tab)
+    // Credit vendor to vendorSplitWallets ONLY (wallet-paid orders)
     if (vendorId && vendorAmount > 0) {
-      const vendorWalletRef = db.collection("vendorWallets").doc(vendorId);
-      batch.set(vendorWalletRef, {balance: FieldValue.increment(vendorAmount)}, {merge: true});
-      const vendorTxRef = db.collection("vendorWalletTransactions").doc();
-      batch.set(vendorTxRef, {
-        vendorId, type: "credit", amount: vendorAmount, orderId,
-        desc: `Order payment — ${order.orderNumber ?? orderId.slice(-8).toUpperCase()}`,
-        source: "wallet_split", createdAt: now,
-      });
-
-      // DELETE these lines from splitWalletPayment.ts — remove the vendorSplitWallets block entirely
       const vendorSplitWalletRef = db.collection("vendorSplitWallets").doc(vendorId);
-      batch.set(vendorSplitWalletRef, {balance: FieldValue.increment(vendorAmount), vendorId}, {merge: true});
+      batch.set(vendorSplitWalletRef, {
+        balance: FieldValue.increment(vendorAmount),
+        vendorId,
+      }, {merge: true});
+
       const vendorSplitTxRef = db.collection("vendorSplitWalletTransactions").doc();
       batch.set(vendorSplitTxRef, {
-        vendorId, type: "credit", amount: vendorAmount, orderId,
+        vendorId,
+        type: "credit",
+        amount: vendorAmount,
+        orderId,
         desc: `Order split — ${order.orderNumber ?? orderId.slice(-8).toUpperCase()}`,
-        source: "wallet_split", createdAt: now,
+        source: "wallet_split",
+        createdAt: now,
       });
     }
 
-    // Platform fee → adminWallets/platform
+    // Platform fee
     if (platformAmount > 0) {
       const adminWalletRef = db.collection("adminWallets").doc("platform");
       batch.set(adminWalletRef, {
@@ -89,7 +84,9 @@ export const splitWalletPayment = onCall(
         totalEarned: FieldValue.increment(platformAmount),
       }, {merge: true});
       const platformRef = db.collection("platformEarnings").doc();
-      batch.set(platformRef, {orderId, amount: platformAmount, source: "wallet_split", createdAt: now});
+      batch.set(platformRef, {
+        orderId, amount: platformAmount, source: "wallet_split", createdAt: now,
+      });
     }
 
     // User debit tx log
@@ -102,8 +99,10 @@ export const splitWalletPayment = onCall(
     });
 
     batch.update(orderRef, {
-      paymentStatus: "paid", paymentMethod: "wallet",
-      walletCharged: true, walletChargedAt: now,
+      paymentStatus: "paid",
+      paymentMethod: "wallet",
+      walletCharged: true,
+      walletChargedAt: now,
       creditsDistributed: false,
       splitAmounts: {vendorAmount, riderAmount, platformAmount},
     });
