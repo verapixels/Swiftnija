@@ -261,13 +261,18 @@ function PaystackTab({ vendorId, fns }: { vendorId: string; fns: ReturnType<type
 
   const addToast = (msg: string, ok = true) => { setToast({ msg, ok }); setTimeout(() => setToast(null), 3500); };
 
-  useEffect(() => {
-    if (!vendorId) return;
-    const u1 = onSnapshot(doc(db, "vendorWallets", vendorId), snap => setBalance(snap.exists() ? (snap.data()!.balance ?? 0) : 0));
-    const u2 = onSnapshot(query(collection(db, "vendorWalletTransactions"), where("vendorId", "==", vendorId), orderBy("createdAt", "desc"), limit(30)), snap => setTxs(snap.docs.map(d => ({ id: d.id, ...d.data() })) as VendorWalletTx[]));
-    const u3 = onSnapshot(doc(db, "vendorBankAccounts", vendorId), snap => setBankAccount(snap.exists() ? snap.data() : null));
-    return () => { u1(); u2(); u3(); };
-  }, [vendorId]);
+useEffect(() => {
+  if (!vendorId) return;
+  const u1 = onSnapshot(doc(db, "vendorWallets", vendorId), snap =>
+    setBalance(snap.exists() ? (snap.data()!.balance ?? 0) : 0));
+  const u2 = onSnapshot(query(collection(db, "vendorWalletTransactions"),
+    where("vendorId", "==", vendorId), orderBy("createdAt", "desc"), limit(30)),
+    snap => setTxs(snap.docs.map(d => ({ id: d.id, ...d.data() })) as VendorWalletTx[]));
+  const u3 = onSnapshot(doc(db, "vendors", vendorId), snap => {
+    setBankAccount(snap.data()?.bankAccount ?? null);
+  });
+  return () => { u1(); u2(); u3(); }; // ← this return was missing, causing the freeze
+}, [vendorId]);
 
   const handleLinkBank = async (params: { bank: PaystackBank; account_number: string; account_name: string }) => {
     setSavingBank(true); setLinkError(null);
@@ -302,7 +307,7 @@ function PaystackTab({ vendorId, fns }: { vendorId: string; fns: ReturnType<type
       <div style={{ background: "linear-gradient(135deg,#FF6B00,#FF9A00)", borderRadius: 22, padding: "24px 22px", marginBottom: 20, position: "relative", overflow: "hidden", boxShadow: "0 12px 40px rgba(255,107,0,.35)" }}>
         <div style={{ position: "absolute", top: -30, right: -30, width: 150, height: 150, borderRadius: "50%", background: "rgba(255,255,255,.08)", pointerEvents: "none" }} />
         <div style={{ fontSize: 10, fontWeight: 800, color: "rgba(255,255,255,.8)", textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 8 }}>Paystack Wallet</div>
-        <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 34, fontWeight: 900, color: "white", letterSpacing: "-1px", lineHeight: 1 }}>₦{balance.toLocaleString("en-NG", { minimumFractionDigits: 2 })}</div>
+        <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 22, fontWeight: 900, color: "white", letterSpacing: "-1px", lineHeight: 1 }}>₦{balance.toLocaleString("en-NG", { minimumFractionDigits: 2 })}</div>
         <div style={{ fontSize: 12, color: "rgba(255,255,255,.7)", marginTop: 4, marginBottom: 18 }}>Total from Paystack: ₦{totalIn.toLocaleString("en-NG")}</div>
         {bankAccount ? (
           <button onClick={() => setShowWithdraw(true)} disabled={balance < 100} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: "white", color: ACCENT, border: "none", borderRadius: 14, padding: "13px 24px", width: "100%", fontFamily: "'Syne',sans-serif", fontSize: 14, fontWeight: 900, cursor: balance < 100 ? "not-allowed" : "pointer", opacity: balance < 100 ? 0.6 : 1 }}>
@@ -356,15 +361,18 @@ function WalletTab({ vendorId, fns }: { vendorId: string; fns: ReturnType<typeof
   const WALLET_ACCENT = "#10B981";
 
   const addToast = (msg: string, ok = true) => { setToast({ msg, ok }); setTimeout(() => setToast(null), 3500); };
-
-  useEffect(() => {
-    if (!vendorId) return;
-    // Wallet from split payments — vendorSplitWallets collection
-    const u1 = onSnapshot(doc(db, "vendorSplitWallets", vendorId), snap => setBalance(snap.exists() ? (snap.data()!.balance ?? 0) : 0));
-    const u2 = onSnapshot(query(collection(db, "vendorSplitWalletTransactions"), where("vendorId", "==", vendorId), orderBy("createdAt", "desc"), limit(30)), snap => setTxs(snap.docs.map(d => ({ id: d.id, ...d.data() })) as VendorWalletTx[]));
-    const u3 = onSnapshot(doc(db, "vendorBankAccounts", vendorId), snap => setBankAccount(snap.exists() ? snap.data() : null));
-    return () => { u1(); u2(); u3(); };
-  }, [vendorId]);
+useEffect(() => {
+  if (!vendorId) return;
+  const u1 = onSnapshot(doc(db, "vendorPaystackEarnings", vendorId), snap =>
+    setBalance(snap.exists() ? (snap.data()!.balance ?? 0) : 0));
+  const u2 = onSnapshot(query(collection(db, "vendorPaystackTransactions"),
+    where("vendorId", "==", vendorId), orderBy("createdAt", "desc"), limit(30)),
+    snap => setTxs(snap.docs.map(d => ({ id: d.id, ...d.data() })) as VendorWalletTx[]));
+  const u3 = onSnapshot(doc(db, "vendors", vendorId), snap => {
+    setBankAccount(snap.data()?.bankAccount ?? null);
+  });
+  return () => { u1(); u2(); u3(); };
+}, [vendorId]);
 
   const handleLinkBank = async (params: { bank: PaystackBank; account_number: string; account_name: string }) => {
     setSavingBank(true); setLinkError(null);
@@ -399,7 +407,7 @@ function WalletTab({ vendorId, fns }: { vendorId: string; fns: ReturnType<typeof
       <div style={{ background: "linear-gradient(135deg,#059669,#10B981)", borderRadius: 22, padding: "24px 22px", marginBottom: 20, position: "relative", overflow: "hidden", boxShadow: "0 12px 40px rgba(16,185,129,.3)" }}>
         <div style={{ position: "absolute", top: -30, right: -30, width: 150, height: 150, borderRadius: "50%", background: "rgba(255,255,255,.08)", pointerEvents: "none" }} />
         <div style={{ fontSize: 10, fontWeight: 800, color: "rgba(255,255,255,.8)", textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 8 }}>Split Wallet Balance</div>
-        <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 34, fontWeight: 900, color: "white", letterSpacing: "-1px", lineHeight: 1 }}>₦{balance.toLocaleString("en-NG", { minimumFractionDigits: 2 })}</div>
+        <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 22, fontWeight: 900, color: "white", letterSpacing: "-1px", lineHeight: 1 }}>₦{balance.toLocaleString("en-NG", { minimumFractionDigits: 2 })}</div>
         <div style={{ fontSize: 12, color: "rgba(255,255,255,.7)", marginTop: 4, marginBottom: 18 }}>Earned from orders: ₦{totalIn.toLocaleString("en-NG")}</div>
         <div style={{ fontSize: 11, color: "rgba(255,255,255,.65)", marginBottom: 18 }}>💡 These are your wallet-order earnings — withdraw anytime</div>
         {bankAccount ? (

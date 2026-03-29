@@ -70,14 +70,15 @@ export const splitWalletPayment = onCall(
         source: "wallet_split", createdAt: now,
       });
 
-      const vendorSplitWalletRef = db.collection("vendorSplitWallets").doc(vendorId);
-      batch.set(vendorSplitWalletRef, {balance: FieldValue.increment(vendorAmount), vendorId}, {merge: true});
-      const vendorSplitTxRef = db.collection("vendorSplitWalletTransactions").doc();
-      batch.set(vendorSplitTxRef, {
-        vendorId, type: "credit", amount: vendorAmount, orderId,
-        desc: `Order split — ${order.orderNumber ?? orderId.slice(-8).toUpperCase()}`,
-        source: "wallet_split", createdAt: now,
-      });
+      // DELETE these lines from splitWalletPayment.ts — remove the vendorSplitWallets block entirely
+const vendorSplitWalletRef = db.collection("vendorSplitWallets").doc(vendorId);
+batch.set(vendorSplitWalletRef, {balance: FieldValue.increment(vendorAmount), vendorId}, {merge: true});
+const vendorSplitTxRef = db.collection("vendorSplitWalletTransactions").doc();
+batch.set(vendorSplitTxRef, {
+  vendorId, type: "credit", amount: vendorAmount, orderId,
+  desc: `Order split — ${order.orderNumber ?? orderId.slice(-8).toUpperCase()}`,
+  source: "wallet_split", createdAt: now,
+});
     }
 
     // Platform fee → adminWallets/platform
