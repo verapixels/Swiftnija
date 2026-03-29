@@ -31,5 +31,6 @@ module.exports = {
     "linebreak-style": "off",
     "quote-props": "off",
     "@typescript-eslint/no-non-null-assertion": "off",
+    "eol-last": "off",
   },
 };
