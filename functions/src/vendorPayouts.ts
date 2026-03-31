@@ -1,172 +1,119 @@
 /* eslint-disable camelcase */
-// functions/src/vendorPayouts.ts
-// ✅ CREATE this as a NEW file — does not exist yet
-
 import {onCall, HttpsError} from "firebase-functions/v2/https";
 import {getFirestore, FieldValue} from "firebase-admin/firestore";
 
 const db = getFirestore();
 
-// ─── createVendorPaystackRecipient ────────────────────────────────────────────
-// Called when vendor links their bank account.
-// Creates Paystack subaccount + transfer recipient, saves to vendorBankAccounts.
-export const createVendorPaystackRecipient = onCall(
+export const splitVendorPayout = onCall(
   {region: "us-central1", enforceAppCheck: false, secrets: ["PAYSTACK_SECRET_KEY"]},
   async (request) => {
-    const vendorId = request.auth?.uid;
-    if (!vendorId) throw new HttpsError("unauthenticated", "Must be signed in");
+    const uid = request.auth?.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Must be signed in");
 
-    const {account_number, bank_code, account_name, bank_name} = request.data as {
-      account_number: string; bank_code: string; account_name: string; bank_name: string;
-    };
-    if (!account_number || !bank_code || !account_name || !bank_name) {
-      throw new HttpsError("invalid-argument", "All bank details are required");
+    const {orderId} = request.data as { orderId: string };
+    if (!orderId) throw new HttpsError("invalid-argument", "orderId required");
+
+    const orderRef = db.collection("orders").doc(orderId);
+    const orderSnap = await orderRef.get();
+    if (!orderSnap.exists) throw new HttpsError("not-found", "Order not found");
+
+    const order = orderSnap.data()!;
+    const orderUserId = order.userId || order.customerId || order.uid;
+    if (orderUserId !== uid) throw new HttpsError("permission-denied", "Not your order");
+    if (order.paymentStatus === "paid" || order.walletCharged) {
+      throw new HttpsError("already-exists", "Order already paid");
     }
 
-    const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY;
-    if (!PAYSTACK_SECRET) throw new HttpsError("internal", "Paystack secret key not configured");
+    const settingsSnap = await db.collection("platformSettings").doc("global").get();
+    const settings = settingsSnap.exists ? settingsSnap.data()! : {};
+    const vendorItemPercent = Number(settings.vendorItemPercent ?? 80);
+    const riderDeliveryPercent = Number(settings.riderDeliveryPercent ?? 85);
 
-    const vendorSnap = await db.collection("vendors").doc(vendorId).get();
-    if (!vendorSnap.exists) throw new HttpsError("not-found", "Vendor not found");
-    const vendor = vendorSnap.data()!;
-    const businessName = vendor.businessName ?? vendor.name ?? "SwiftNija Vendor";
+    const subtotal = Math.round((order.subtotal ?? order.total ?? 0) * 100) / 100;
+    const deliveryFee = Math.round((order.deliveryFee ?? 0) * 100) / 100;
+    const discount = Math.round((order.discount ?? 0) * 100) / 100;
+    const totalCharge = Math.round((subtotal + deliveryFee - discount) * 100) / 100;
+    if (totalCharge <= 0) throw new HttpsError("invalid-argument", "Order total must be > 0");
 
-    // Create Paystack subaccount (for card payment splits)
-    const subRes = await fetch("https://api.paystack.co/subaccount", {
-      method: "POST",
-      headers: {"Authorization": `Bearer ${PAYSTACK_SECRET}`, "Content-Type": "application/json"},
-      body: JSON.stringify({
-        business_name: businessName,
-        settlement_bank: bank_code,
-        account_number,
-        percentage_charge: 0,
-        primary_contact_email: vendor.email ?? "",
-      }),
+    const vendorAmount = Math.round(subtotal * (vendorItemPercent / 100) * 100) / 100;
+    const riderAmount = Math.round(deliveryFee * (riderDeliveryPercent / 100) * 100) / 100;
+    const platformAmount = Math.round((totalCharge - vendorAmount - riderAmount) * 100) / 100;
+    const vendorId = order.vendorId as string | undefined;
+
+    const walletRef = db.collection("wallets").doc(uid);
+    const walletSnap = await walletRef.get();
+    const currentBalance = walletSnap.exists ? (walletSnap.data()!.balance ?? 0) : 0;
+    if (currentBalance < totalCharge) {
+      throw new HttpsError(
+        "failed-precondition",
+        `Insufficient wallet balance. Need ₦${totalCharge.toFixed(2)}, have ₦${currentBalance.toFixed(2)}`
+      );
+    }
+
+    const batch = db.batch();
+    const now = FieldValue.serverTimestamp();
+
+    // Debit user wallet
+    batch.update(walletRef, {balance: FieldValue.increment(-totalCharge)});
+
+    // Credit vendor to vendorSplitWallets ONLY (wallet-paid orders)
+    if (vendorId && vendorAmount > 0) {
+      const vendorSplitWalletRef = db.collection("vendorSplitWallets").doc(vendorId);
+      batch.set(vendorSplitWalletRef, {
+        balance: FieldValue.increment(vendorAmount),
+        vendorId,
+      }, {merge: true});
+
+      const vendorSplitTxRef = db.collection("vendorSplitWalletTransactions").doc();
+      batch.set(vendorSplitTxRef, {
+        vendorId,
+        type: "credit",
+        amount: vendorAmount,
+        orderId,
+        desc: `Order split — ${order.orderNumber ?? orderId.slice(-8).toUpperCase()}`,
+        source: "wallet_split",
+        createdAt: now,
+      });
+    }
+
+    // Platform fee
+    if (platformAmount > 0) {
+      const adminWalletRef = db.collection("adminWallets").doc("platform");
+      batch.set(adminWalletRef, {
+        balance: FieldValue.increment(platformAmount),
+        totalEarned: FieldValue.increment(platformAmount),
+      }, {merge: true});
+      const platformRef = db.collection("platformEarnings").doc();
+      batch.set(platformRef, {
+        orderId, amount: platformAmount, source: "wallet_split", createdAt: now,
+      });
+    }
+
+    // User debit tx log
+    const userTxRef = db.collection("walletTransactions").doc();
+    batch.set(userTxRef, {
+      userId: uid, type: "debit", amount: totalCharge, orderId,
+      desc: `Order #${order.orderNumber ?? orderId.slice(-8).toUpperCase()} — ${order.vendorName ?? ""}`,
+      splits: {vendorAmount, riderAmount, platformAmount},
+      createdAt: now,
     });
-    const subData = await subRes.json() as { status: boolean; message: string; data: { subaccount_code: string } };
-    if (!subData.status) throw new HttpsError("internal", `Paystack subaccount error: ${subData.message}`);
 
-    // Create transfer recipient (for manual withdrawals)
-    const recRes = await fetch("https://api.paystack.co/transferrecipient", {
-      method: "POST",
-      headers: {"Authorization": `Bearer ${PAYSTACK_SECRET}`, "Content-Type": "application/json"},
-      body: JSON.stringify({type: "nuban", name: account_name, account_number, bank_code, currency: "NGN"}),
+    batch.update(orderRef, {
+      paymentStatus: "paid",
+      paymentMethod: "wallet",
+      walletCharged: true,
+      walletChargedAt: now,
+      creditsDistributed: false,
+      splitAmounts: {vendorAmount, riderAmount, platformAmount},
     });
-    const recData = await recRes.json() as { status: boolean; message: string; data: { recipient_code: string } };
-    if (!recData.status) throw new HttpsError("internal", `Paystack recipient error: ${recData.message}`);
 
-    // Save — shared by both Paystack tab and Wallet tab
-    await db.collection("vendorBankAccounts").doc(vendorId).set({
-      vendorId, account_number, bank_code, account_name, bank_name,
-      subaccount_code: subData.data.subaccount_code,
-      recipient_code: recData.data.recipient_code,
-      linkedAt: FieldValue.serverTimestamp(),
-    });
+    await batch.commit();
 
     return {
       success: true,
-      subaccount_code: subData.data.subaccount_code,
-      recipient_code: recData.data.recipient_code,
+      totalCharged: totalCharge,
+      splits: {vendorAmount, riderAmount, platformAmount},
+      newBalance: currentBalance - totalCharge,
     };
-  }
-);
-
-// ─── vendorWalletWithdraw ─────────────────────────────────────────────────────
-// Vendor withdraws from their PAYSTACK tab (vendorWallets collection).
-export const vendorWalletWithdraw = onCall(
-  {region: "us-central1", enforceAppCheck: false, secrets: ["PAYSTACK_SECRET_KEY"]},
-  async (request) => {
-    const vendorId = request.auth?.uid;
-    if (!vendorId) throw new HttpsError("unauthenticated", "Must be signed in");
-
-    const {amount} = request.data as { amount: number };
-    if (!amount || amount < 100) throw new HttpsError("invalid-argument", "Minimum withdrawal is ₦100");
-
-    const walletRef = db.collection("vendorWallets").doc(vendorId);
-    const walletSnap = await walletRef.get();
-    const balance = walletSnap.exists ? (walletSnap.data()!.balance ?? 0) : 0;
-    if (balance < amount) throw new HttpsError("failed-precondition", `Insufficient balance. Have ₦${balance.toFixed(2)}`);
-
-    const vendorSnap = await db.collection("vendors").doc(vendorId).get();
-    const bank = vendorSnap.data()?.bankAccount;
-    if (!bank) throw new HttpsError("failed-precondition", "No bank account linked");
-    if (!bank.recipient_code) throw new HttpsError("failed-precondition", "Bank account not fully set up");
-
-    const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY;
-    const transferRes = await fetch("https://api.paystack.co/transfer", {
-      method: "POST",
-      headers: {"Authorization": `Bearer ${PAYSTACK_SECRET}`, "Content-Type": "application/json"},
-      body: JSON.stringify({
-        source: "balance",
-        amount: Math.round(amount * 100),
-        recipient: bank.recipient_code,
-        reason: "SwiftNija vendor withdrawal",
-      }),
-    });
-    const transferData = await transferRes.json() as { status: boolean; data: { transfer_code: string; status: string } };
-    if (!transferData.status) throw new HttpsError("internal", `Paystack transfer failed: ${JSON.stringify(transferData)}`);
-
-    const batch = db.batch();
-    const now = FieldValue.serverTimestamp();
-    batch.update(walletRef, {balance: FieldValue.increment(-amount)});
-    const txRef = db.collection("vendorWalletTransactions").doc();
-    batch.set(txRef, {
-      vendorId, type: "debit", amount,
-      desc: `Withdrawal to ${bank.bank_name} (****${bank.account_number?.slice(-4)})`,
-      transferCode: transferData.data.transfer_code, createdAt: now,
-    });
-    await batch.commit();
-
-    return {success: true, newBalance: balance - amount, transferCode: transferData.data.transfer_code};
-  }
-);
-
-// ─── vendorSplitWalletWithdraw ────────────────────────────────────────────────
-// Vendor withdraws from their WALLET tab (vendorSplitWallets collection).
-export const vendorSplitWalletWithdraw = onCall(
-  {region: "us-central1", enforceAppCheck: false, secrets: ["PAYSTACK_SECRET_KEY"]},
-  async (request) => {
-    const vendorId = request.auth?.uid;
-    if (!vendorId) throw new HttpsError("unauthenticated", "Must be signed in");
-
-    const {amount} = request.data as { amount: number };
-    if (!amount || amount < 100) throw new HttpsError("invalid-argument", "Minimum withdrawal is ₦100");
-
-    const walletRef = db.collection("vendorSplitWallets").doc(vendorId);
-    const walletSnap = await walletRef.get();
-    const balance = walletSnap.exists ? (walletSnap.data()!.balance ?? 0) : 0;
-    if (balance < amount) throw new HttpsError("failed-precondition", `Insufficient balance. Have ₦${balance.toFixed(2)}`);
-
-    const vendorSnap = await db.collection("vendors").doc(vendorId).get();
-    const bank = vendorSnap.data()?.bankAccount;
-    if (!bank) throw new HttpsError("failed-precondition", "No bank account linked");
-    if (!bank.recipient_code) throw new HttpsError("failed-precondition", "Bank account not fully set up");
-
-    const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY;
-    const transferRes = await fetch("https://api.paystack.co/transfer", {
-      method: "POST",
-      headers: {"Authorization": `Bearer ${PAYSTACK_SECRET}`, "Content-Type": "application/json"},
-      body: JSON.stringify({
-        source: "balance",
-        amount: Math.round(amount * 100),
-        recipient: bank.recipient_code,
-        reason: "SwiftNija vendor wallet withdrawal",
-      }),
-    });
-    const transferData = await transferRes.json() as { status: boolean; data: { transfer_code: string; status: string } };
-    if (!transferData.status) throw new HttpsError("internal", `Paystack transfer failed: ${JSON.stringify(transferData)}`);
-
-    const batch = db.batch();
-    const now = FieldValue.serverTimestamp();
-    batch.update(walletRef, {balance: FieldValue.increment(-amount)});
-    const txRef = db.collection("vendorSplitWalletTransactions").doc();
-    batch.set(txRef, {
-      vendorId, type: "debit", amount,
-      desc: `Wallet withdrawal to ${bank.bank_name} (****${bank.account_number?.slice(-4)})`,
-      transferCode: transferData.data.transfer_code, createdAt: now,
-    });
-    await batch.commit();
-
-    return {success: true, newBalance: balance - amount, transferCode: transferData.data.transfer_code};
   }
 );

@@ -4,6 +4,7 @@ import * as crypto from "crypto";
 import {buildOtpEmail} from "./otpEmailTemplate";
 import {onDocumentUpdated, onDocumentCreated} from "firebase-functions/v2/firestore";
 import {onSchedule} from "firebase-functions/v2/scheduler";
+import { onRequest } from "firebase-functions/v2/https";
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -615,188 +616,254 @@ export const paystackInitializePayment = onCall({
   };
 });
 
+
 // ─────────────────────────────────────────
-// FUNCTION 14: paystackVerifyPayment
+// FUNCTION 13 (NEW): paystackInitializeOrderPayment
+// Called from CartPage when user clicks Pay Now.
+// Creates the Paystack transaction with the vendor split baked in.
+// Order stays "pending" until the webhook below confirms it.
 // ─────────────────────────────────────────
-export const paystackVerifyPayment = onCall({
+export const paystackInitializeOrderPayment = onCall({
   cors: CORS_ORIGINS,
   secrets: ["PAYSTACK_SECRET_KEY"],
 }, async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "You must be signed in.");
-
+ 
   const uid = request.auth.uid;
-  const {reference} = request.data as {reference: string};
-
-  if (!reference || typeof reference !== "string") {
-    throw new HttpsError("invalid-argument", "Payment reference is required.");
+  const email = request.auth.token.email;
+  if (!email) throw new HttpsError("invalid-argument", "No email on account.");
+ 
+  const { orderId, amountKobo, vendorSubaccountCode } = request.data as {
+    orderId: string;
+    amountKobo: number;
+    vendorSubaccountCode?: string;
+  };
+ 
+  if (!orderId) throw new HttpsError("invalid-argument", "orderId required.");
+  if (!amountKobo || amountKobo < 10000) {
+    throw new HttpsError("invalid-argument", "Minimum order is ₦100.");
   }
-
-  const pendingSnap = await db.collection("walletPendingTx").doc(reference).get();
-  if (!pendingSnap.exists) {
-    throw new HttpsError("not-found", "Transaction record not found.");
-  }
-  const pending = pendingSnap.data() ?? {};
-  if (pending.uid !== uid) {
-    throw new HttpsError("permission-denied", "This transaction does not belong to you.");
-  }
-
-  if (pending.status === "success") {
-    const walletSnap = await db.collection("wallets").doc(uid).get();
-    return {
-      success: true,
-      alreadyProcessed: true,
-      newBalance: walletSnap.data()?.balance ?? 0,
-      amountCredited: pending.amountNaira,
-    };
-  }
-
+ 
+  // Read split percentage from Firestore so admin can change it any time
+  const settingsSnap = await db.collection("platformSettings").doc("global").get();
+  const settings = settingsSnap.exists ? settingsSnap.data()! : {};
+  const vendorItemPercent = Number(settings.vendorItemPercent ?? 80);
+ 
   const secretKey = process.env.PAYSTACK_SECRET_KEY;
   if (!secretKey) throw new HttpsError("internal", "Paystack secret key not configured.");
-
-  const res = await fetch(
-    `https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`,
-    {headers: {Authorization: `Bearer ${secretKey}`}}
-  );
-
+ 
+  // Reference ties this Paystack transaction to your order document
+  const reference = `swiftnija_order_${orderId}_${Date.now()}`;
+ 
+  // Save a pending record so the webhook can look it up by reference
+  await db.collection("orderPendingTx").doc(reference).set({
+    uid,
+    email,
+    orderId,
+    amountKobo,
+    reference,
+    status: "pending",
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+ 
+  // Build the Paystack request body
+  const body: Record<string, unknown> = {
+    email,
+    amount: amountKobo,
+    reference,
+    currency: "NGN",
+    // All channels — card, bank transfer, USSD, QR, mobile money
+    channels: ["card", "bank", "ussd", "qr", "mobile_money", "bank_transfer"],
+    metadata: {
+      uid,
+      orderId,
+      purpose: "order_payment",
+    },
+  };
+ 
+  // Wire in the split only if the vendor has a linked subaccount
+  if (vendorSubaccountCode) {
+    body.split = {
+      type: "percentage",
+      bearer_type: "account", // platform bears Paystack fees
+      subaccounts: [
+        {
+          subaccount: vendorSubaccountCode,
+          share: vendorItemPercent, // e.g. 80 = vendor gets 80%
+        },
+      ],
+    };
+  }
+ 
+  const res = await fetch("https://api.paystack.co/transaction/initialize", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${secretKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+ 
   const data = await res.json() as {
     status: boolean;
     message: string;
     data: {
-      status: string;
-      amount: number;
-      currency: string;
+      authorization_url: string;
+      access_code: string;
       reference: string;
-      paid_at: string;
-      customer: {email: string};
     };
   };
-
+ 
   if (!data.status) {
-    throw new HttpsError("internal", `Paystack verify error: ${data.message}`);
+    throw new HttpsError("internal", `Paystack error: ${data.message}`);
   }
-
-  const tx = data.data;
-
-  if (tx.status !== "success") {
-    await db.collection("walletPendingTx").doc(reference).update({
-      status: tx.status,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-    throw new HttpsError(
-      "failed-precondition",
-      tx.status === "abandoned" ?
-        "Payment was not completed. Please try again." :
-        "Payment failed. Please try a different payment method."
-    );
-  }
-
-  if (tx.amount !== pending.amountKobo) {
-    console.error(`[paystackVerifyPayment] Amount mismatch! expected=${pending.amountKobo} got=${tx.amount}`);
-    throw new HttpsError("internal", "Amount mismatch — contact support.");
-  }
-
-  const amountNaira = tx.amount / 100;
-  const walletRef = db.collection("wallets").doc(uid);
-  const txRef = db.collection("walletTransactions").doc();
-
-  let newBalance = 0;
-  await db.runTransaction(async (firestoreTx) => {
-    const walletSnap = await firestoreTx.get(walletRef);
-    const currentBalance: number = walletSnap.exists ? (walletSnap.data()?.balance ?? 0) : 0;
-    newBalance = currentBalance + amountNaira;
-
-    firestoreTx.set(walletRef, {
-      uid,
-      balance: newBalance,
-      totalIn: admin.firestore.FieldValue.increment(amountNaira),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    }, {merge: true});
-
-    firestoreTx.set(txRef, {
-      userId: uid,
-      type: "credit",
-      amount: amountNaira,
-      desc: "Wallet top-up via Paystack",
-      reference,
-      paystackStatus: "success",
-      paidAt: tx.paid_at,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-  });
-
-  await db.collection("walletPendingTx").doc(reference).update({
-    status: "success",
-    creditedAmount: amountNaira,
-    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-  });
-
-  console.info(`[paystackVerifyPayment] ✅ Credited ₦${amountNaira} to uid=${uid} — newBalance=₦${newBalance}`);
-
+ 
+  console.info(`[paystackInitializeOrderPayment] uid=${uid} orderId=${orderId} ref=${reference} amount=₦${amountKobo / 100}`);
+ 
   return {
     success: true,
-    newBalance,
-    amountCredited: amountNaira,
+    authorizationUrl: data.data.authorization_url,
+    accessCode: data.data.access_code,
+    reference: data.data.reference,
   };
 });
-
+ 
+ 
 // ─────────────────────────────────────────
-// FUNCTION 15: walletDebit
-// ─────────────────────────────────────────
-export const walletDebit = onCall({
-  cors: CORS_ORIGINS,
-}, async (request) => {
-  if (!request.auth) throw new HttpsError("unauthenticated", "You must be signed in.");
-
-  const uid = request.auth.uid;
-  const {amountNaira, orderId, description} = request.data as {
-    amountNaira: number;
-    orderId: string;
-    description: string;
+// FUNCTION 14 (NEW): paystackWebhook
+export const paystackWebhook = onRequest({
+  region: "us-central1",
+  secrets: ["PAYSTACK_SECRET_KEY"],
+}, async (req, res) => {
+  // Only accept POST requests
+  if (req.method !== "POST") {
+    res.status(405).send("Method Not Allowed");
+    return;
+  }
+ 
+  // Verify the request actually came from Paystack using HMAC signature
+  const secretKey = process.env.PAYSTACK_SECRET_KEY;
+  if (!secretKey) {
+    console.error("[paystackWebhook] PAYSTACK_SECRET_KEY not configured");
+    res.status(500).send("Server error");
+    return;
+  }
+ 
+  const signature = req.headers["x-paystack-signature"] as string;
+  const rawBody   = JSON.stringify(req.body);
+  const hash      = crypto
+    .createHmac("sha512", secretKey)
+    .update(rawBody)
+    .digest("hex");
+ 
+  if (hash !== signature) {
+    console.warn("[paystackWebhook] Invalid signature — request ignored");
+    res.status(400).send("Invalid signature");
+    return;
+  }
+ 
+  // Acknowledge receipt immediately — Paystack expects 200 within 5 seconds
+  res.status(200).send("OK");
+ 
+  const event = req.body as {
+    event: string;
+    data: {
+      status: string;
+      reference: string;
+      amount: number;
+      customer: { email: string };
+    };
   };
-
-  if (!amountNaira || amountNaira <= 0) {
-    throw new HttpsError("invalid-argument", "Invalid debit amount.");
+ 
+  // We only care about successful charge events
+  if (event.event !== "charge.success") {
+    console.info(`[paystackWebhook] Ignored event: ${event.event}`);
+    return;
   }
-  if (!orderId) {
-    throw new HttpsError("invalid-argument", "Order ID is required.");
-  }
-
-  const walletRef = db.collection("wallets").doc(uid);
-  const txRef = db.collection("walletTransactions").doc();
-  let newBalance = 0;
-
-  await db.runTransaction(async (firestoreTx) => {
-    const walletSnap = await firestoreTx.get(walletRef);
-    const currentBalance: number = walletSnap.exists ? (walletSnap.data()?.balance ?? 0) : 0;
-
-    if (currentBalance < amountNaira) {
-      throw new HttpsError(
-        "failed-precondition",
-        `Insufficient wallet balance. Available: ₦${currentBalance.toLocaleString("en-NG")}`
-      );
+ 
+  const { reference, amount: paidAmountKobo } = event.data;
+ 
+  try {
+    // Look up the pending transaction record we created during initialization
+    const pendingSnap = await db.collection("orderPendingTx").doc(reference).get();
+    if (!pendingSnap.exists) {
+      console.warn(`[paystackWebhook] No pending tx found for ref: ${reference}`);
+      return;
     }
-
-    newBalance = currentBalance - amountNaira;
-
-    firestoreTx.set(walletRef, {
-      uid,
-      balance: newBalance,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    }, {merge: true});
-
-    firestoreTx.set(txRef, {
-      userId: uid,
-      type: "debit",
-      amount: amountNaira,
-      desc: description || `Payment for order #${orderId}`,
-      orderId,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+ 
+    const pending = pendingSnap.data()!;
+ 
+    // Idempotency — don't process the same payment twice
+    if (pending.status === "success") {
+      console.info(`[paystackWebhook] Already processed ref: ${reference}`);
+      return;
+    }
+ 
+    // Verify the amount matches what we expected
+    if (paidAmountKobo !== pending.amountKobo) {
+      console.error(`[paystackWebhook] Amount mismatch! expected=${pending.amountKobo} got=${paidAmountKobo} ref=${reference}`);
+      return;
+    }
+ 
+    const { orderId, uid } = pending;
+ 
+    // Verify the order actually exists
+    const orderRef  = db.collection("orders").doc(orderId);
+    const orderSnap = await orderRef.get();
+    if (!orderSnap.exists) {
+      console.error(`[paystackWebhook] Order not found: ${orderId}`);
+      return;
+    }
+ 
+    const orderData = orderSnap.data()!;
+ 
+    // Don't double-confirm
+    if (orderData.paymentStatus === "paid") {
+      console.info(`[paystackWebhook] Order already confirmed: ${orderId}`);
+      await db.collection("orderPendingTx").doc(reference).update({ status: "success" });
+      return;
+    }
+ 
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    const batch = db.batch();
+ 
+    // Mark the order as paid and move it to confirmed so rider assignment kicks in
+    batch.update(orderRef, {
+      paymentStatus:      "paid",
+      status:             "confirmed",
+      paystackReference:  reference,
+      paidAmountKobo,
+      paidAt:             now,
+      updatedAt:          now,
     });
-  });
-
-  console.info(`[walletDebit] ✅ Debited ₦${amountNaira} from uid=${uid} for order=${orderId} — newBalance=₦${newBalance}`);
-
-  return {success: true, newBalance, amountDebited: amountNaira};
+ 
+    // Mark the pending tx as processed
+    batch.update(db.collection("orderPendingTx").doc(reference), {
+      status:    "success",
+      updatedAt: now,
+    });
+ 
+    // Log the payment in a payments collection for your records
+    const paymentRef = db.collection("payments").doc(reference);
+    batch.set(paymentRef, {
+      reference,
+      orderId,
+      uid,
+      amountKobo:   paidAmountKobo,
+      amountNaira:  paidAmountKobo / 100,
+      channel:      event.data.status,
+      customerEmail: event.data.customer.email,
+      source:       "paystack_webhook",
+      createdAt:    now,
+    });
+ 
+    await batch.commit();
+ 
+    console.info(`[paystackWebhook] Order ${orderId} confirmed. ₦${paidAmountKobo / 100} paid. ref=${reference}`);
+ 
+  } catch (err) {
+    console.error("[paystackWebhook] Error processing webhook:", err);
+  }
 });
 
 /* eslint-enable camelcase */
@@ -1343,10 +1410,9 @@ export const updateOrderStatus = onCall({cors: CORS_ORIGINS}, async (request) =>
       const orderSnap2 = await orderRef.get();
       const orderData2 = orderSnap2.data()!;
 
-      const isWalletOrder = orderData2.paymentMethod === "wallet";
       const alreadyDistributed = orderData2.creditsDistributed === true;
 
-      if (isWalletOrder && !alreadyDistributed) {
+       if (!alreadyDistributed) {
         const storedSplits = orderData2.splitAmounts as {
       vendorAmount: number;
       riderAmount: number;
@@ -2544,7 +2610,6 @@ export const reassignStuckOrders = onSchedule("every 2 minutes", async () => {
   }
 });
 
-export * from "./splitWalletPayment";
 export * from "./vendorPayouts";
 export * from "./riderPayouts";
 export * from "./adminPayouts";
