@@ -1,9 +1,8 @@
 import { useState, useEffect } from "react";
 import { signOut } from "firebase/auth";
-import { doc, onSnapshot, updateDoc } from "firebase/firestore";
+import { doc, onSnapshot, updateDoc, collection, query, where, getDocs, Timestamp } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { auth, db, functions } from "../firebase";
-import { useNavigate } from "react-router-dom";
 import BottomNav from "../components/BottomNav";
 import { useTheme } from "../context/ThemeContext";
 import { useFCMToken } from "../hooks/useFCMToken";
@@ -16,6 +15,7 @@ import {
 } from "react-icons/ri";
 import RiderOrderHistory from "./RiderOrderHistory";
 import RiderPayoutsPage from "./Riderpayoutspage";
+import RiderSettingsTab from "./Ridersettingstab";
 import { useMaintenanceBanner } from "../hooks/useMaintenanceBanner";
 
 const O = "#FF6B00";
@@ -35,11 +35,11 @@ type RiderData = {
   status: string;
   approved: boolean;
   isOnline: boolean;
-  currentOrderId?: string;           // ✅ present
-  currentOrderCollection?: string;   // ✅ present
-  currentDeliveryId?: string;        // ✅ added bonus
-  rejectionReason?: string;          // ✅ present
-  stats: { acceptanceRate: number; rating: number; totalDeliveries: number }; // ✅ present
+  currentOrderId?: string;
+  currentOrderCollection?: string;
+  currentDeliveryId?: string;
+  rejectionReason?: string;
+  stats: { acceptanceRate: number; rating: number; totalDeliveries: number };
 };
 
 type ActiveOrder = {
@@ -53,13 +53,21 @@ type ActiveOrder = {
   destAddress?: string;
   riderAccepted?: boolean;
   deliveryFee?: number;
-  riderPickupCode?: string;  // ← rider shows this to vendor
+  riderPickupCode?: string;
 };
 
 type IncomingOrderData = {
   orderId: string;
   vendorName: string;
   totalAmount: string;
+};
+
+// Earnings from Firestore
+type EarningsData = {
+  today: number;
+  week: number;
+  month: number;
+  orders: number;
 };
 
 const VEHICLE_LABELS: Record<string, string> = {
@@ -85,20 +93,56 @@ const T = {
   },
 };
 
+// ─── Earnings loader ──────────────────────────────────────────────────────────
+async function loadEarnings(uid: string): Promise<EarningsData> {
+  const now    = new Date();
+  const todayStart  = new Date(now); todayStart.setHours(0,0,0,0);
+  const weekStart   = new Date(now); weekStart.setDate(now.getDate() - now.getDay()); weekStart.setHours(0,0,0,0);
+  const monthStart  = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  // Query all accepted/delivered orders for this rider
+  const q = query(
+    collection(db, "orders"),
+    where("riderId", "==", uid),
+    where("riderAccepted", "==", true),
+  );
+  const snap = await getDocs(q);
+
+  let today = 0, week = 0, month = 0, orders = 0;
+
+  snap.forEach(d => {
+    const data  = d.data();
+    const fee   = Number(data.deliveryFee ?? 0);
+    const ts    = (data.createdAt as Timestamp | null)?.toDate?.() ?? null;
+    if (!ts || data.status !== "delivered") return;
+
+    orders++;
+    month += fee;
+    if (ts >= weekStart)  week  += fee;
+    if (ts >= todayStart) today += fee;
+  });
+
+  return { today, week, month, orders };
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
 export default function RiderDashboard() {
-  const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
   const tk = T[theme];
 
+  // KEY FIX: tab 3 is now Settings, not a route navigation
   const [tab,            setTab]            = useState(0);
   const [rider,          setRider]          = useState<RiderData | null>(null);
   const [togglingOnline, setTogglingOnline] = useState(false);
+  const [earnings,       setEarnings]       = useState<EarningsData>({ today: 0, week: 0, month: 0, orders: 0 });
+  const [earningsLoaded, setEarningsLoaded] = useState(false);
 
   const [incomingOrder,  setIncomingOrder]  = useState<IncomingOrderData | null>(null);
   const [activeOrder,    setActiveOrder]    = useState<ActiveOrder | null>(null);
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [showNavMap,     setShowNavMap]     = useState(false);
-const { banner: maintenanceBanner, dismissed: bannerDismissed, dismiss: dismissBanner } = useMaintenanceBanner("rider");
+
+  const { banner: maintenanceBanner, dismissed: bannerDismissed, dismiss: dismissBanner } = useMaintenanceBanner("rider");
 
   // Load rider data
   useEffect(() => {
@@ -109,64 +153,79 @@ const { banner: maintenanceBanner, dismissed: bannerDismissed, dismiss: dismissB
     });
   }, []);
 
+  // Load earnings once when rider is available, and refresh when switching to home tab
+  useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    if (!uid || earningsLoaded) return;
+    loadEarnings(uid).then(e => { setEarnings(e); setEarningsLoaded(true); });
+  }, [rider, earningsLoaded]);
+
+  // Re-fetch earnings whenever user comes to home tab
+  useEffect(() => {
+    if (tab === 0) {
+      const uid = auth.currentUser?.uid;
+      if (!uid) return;
+      loadEarnings(uid).then(setEarnings);
+    }
+  }, [tab]);
+
   useFCMToken();
 
- useEffect(() => {
-  if (!rider?.currentOrderId) {
-    // Delay clearing so brief Firestore flickers don't kill the alert
-    const timeout = setTimeout(() => {
-      setActiveOrder(null);
-      setIncomingOrder(null);
-    }, 3000); // wait 3 seconds before clearing
-    return () => clearTimeout(timeout);
-  }
-
-  const orderCollection = rider.currentOrderCollection ?? "orders";
-  const unsub = onSnapshot(doc(db, orderCollection, rider.currentOrderId), snap => {
-    if (!snap.exists()) {
-      setIncomingOrder(null);
-      setActiveOrder(null);
-      return;
-    }
-    const order = snap.data();
-
-    if (order.riderAccepted && order.riderId && order.riderId !== rider.uid) {
-      setIncomingOrder(null);
-      setActiveOrder(null);
-      return;
+  useEffect(() => {
+    if (!rider?.currentOrderId) {
+      const timeout = setTimeout(() => {
+        setActiveOrder(null);
+        setIncomingOrder(null);
+      }, 3000);
+      return () => clearTimeout(timeout);
     }
 
-    const isPendingAcceptance =
-      !order.riderAccepted &&
-      ["rider_assigned", "pending", "finding_rider"].includes(order.status);
+    const orderCollection = rider.currentOrderCollection ?? "orders";
+    const unsub = onSnapshot(doc(db, orderCollection, rider.currentOrderId), snap => {
+      if (!snap.exists()) {
+        setIncomingOrder(null);
+        setActiveOrder(null);
+        return;
+      }
+      const order = snap.data();
 
-    if (isPendingAcceptance) {
-      setIncomingOrder({
-        orderId: snap.id,
-        vendorName: order.vendorName ?? "Vendor",
-        totalAmount: String(order.deliveryFee ?? order.total ?? ""),
-      });
-      setActiveOrder(null);
-    } else {
-      setIncomingOrder(null);
-      setActiveOrder({
-        orderId:         snap.id,
-        status:          order.status,
-        vendorName:      order.vendorName,
-        vendorLat:       order.vendorLat,
-        vendorLng:       order.vendorLng,
-        destLat:         order.userLat,
-        destLng:         order.userLng,
-        destAddress:     order.deliveryAddress,
-        riderAccepted:   order.riderAccepted,
-        deliveryFee:     order.deliveryFee ?? 0,
-        riderPickupCode: order.riderPickupCode,
-      });
-    }
-  });
+      if (order.riderAccepted && order.riderId && order.riderId !== rider.uid) {
+        setIncomingOrder(null);
+        setActiveOrder(null);
+        return;
+      }
 
-  return () => unsub();
-}, [rider?.currentOrderId, rider?.currentOrderCollection, rider?.uid]);
+      const isPendingAcceptance =
+        !order.riderAccepted &&
+        ["rider_assigned", "pending", "finding_rider"].includes(order.status);
+
+      if (isPendingAcceptance) {
+        setIncomingOrder({
+          orderId: snap.id,
+          vendorName: order.vendorName ?? "Vendor",
+          totalAmount: String(order.deliveryFee ?? order.total ?? ""),
+        });
+        setActiveOrder(null);
+      } else {
+        setIncomingOrder(null);
+        setActiveOrder({
+          orderId:         snap.id,
+          status:          order.status,
+          vendorName:      order.vendorName,
+          vendorLat:       order.vendorLat,
+          vendorLng:       order.vendorLng,
+          destLat:         order.userLat,
+          destLng:         order.userLng,
+          destAddress:     order.deliveryAddress,
+          riderAccepted:   order.riderAccepted,
+          deliveryFee:     order.deliveryFee ?? 0,
+          riderPickupCode: order.riderPickupCode,
+        });
+      }
+    });
+
+    return () => unsub();
+  }, [rider?.currentOrderId, rider?.currentOrderCollection, rider?.uid]);
 
   // FCM foreground messages
   useEffect(() => {
@@ -184,68 +243,64 @@ const { banner: maintenanceBanner, dismissed: bannerDismissed, dismiss: dismissB
     return () => window.removeEventListener("fcm-new-order", handler);
   }, []);
 
-  // Notification sound — plays on service worker message AND foreground FCM
-useEffect(() => {
-  const audio = new Audio("/alert.mp3");
-  audio.preload = "auto";
+  // Notification sound
+  useEffect(() => {
+    const audio = new Audio("/alert.mp3");
+    audio.preload = "auto";
 
-  // From service worker (background notifications)
-  const handleSWMessage = (event: MessageEvent) => {
-    if (event.data?.type === "PLAY_NOTIFICATION_SOUND") {
-      audio.volume = parseFloat(localStorage.getItem("riderAlertVolume") ?? "1.0");
-      audio.currentTime = 0;
-      audio.play().catch(() => {});
-    }
-    if (event.data?.type === "new-order" && event.data.orderId) {
-      setIncomingOrder({
-        orderId:     event.data.orderId,
-        vendorName:  event.data.vendorName ?? "Vendor",
-        totalAmount: event.data.totalAmount ?? "",
-      });
-    }
-  };
+    const handleSWMessage = (event: MessageEvent) => {
+      if (event.data?.type === "PLAY_NOTIFICATION_SOUND") {
+        audio.volume = parseFloat(localStorage.getItem("riderAlertVolume") ?? "1.0");
+        audio.currentTime = 0;
+        audio.play().catch(() => {});
+      }
+      if (event.data?.type === "new-order" && event.data.orderId) {
+        setIncomingOrder({
+          orderId:     event.data.orderId,
+          vendorName:  event.data.vendorName ?? "Vendor",
+          totalAmount: event.data.totalAmount ?? "",
+        });
+      }
+    };
 
-  // From foreground FCM (app is open)
-  const handleForegroundOrder = (e: Event) => {
-    const detail = (e as CustomEvent).detail;
-    if (detail?.orderId) {
-      audio.volume = parseFloat(localStorage.getItem("riderAlertVolume") ?? "1.0");
-      audio.currentTime = 0;
-      audio.play().catch(() => {});
-    }
-  };
+    const handleForegroundOrder = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.orderId) {
+        audio.volume = parseFloat(localStorage.getItem("riderAlertVolume") ?? "1.0");
+        audio.currentTime = 0;
+        audio.play().catch(() => {});
+      }
+    };
 
-  navigator.serviceWorker?.addEventListener("message", handleSWMessage);
-  window.addEventListener("fcm-new-order", handleForegroundOrder);
+    navigator.serviceWorker?.addEventListener("message", handleSWMessage);
+    window.addEventListener("fcm-new-order", handleForegroundOrder);
 
-  return () => {
-    navigator.serviceWorker?.removeEventListener("message", handleSWMessage);
-    window.removeEventListener("fcm-new-order", handleForegroundOrder);
-  };
-}, []);
+    return () => {
+      navigator.serviceWorker?.removeEventListener("message", handleSWMessage);
+      window.removeEventListener("fcm-new-order", handleForegroundOrder);
+    };
+  }, []);
 
   const handleUpdateStatus = async (newStatus: "picked_up" | "arriving" | "delivered") => {
-  if (!activeOrder || updatingStatus) return;
-  if (activeOrder.status === newStatus) return; // ← ADD THIS LINE
-  if (activeOrder.status === "delivered") return; // ← AND THIS
-  setUpdatingStatus(true);
-  try {
-    const fn = httpsCallable(functions, "updateOrderStatus");
-    await fn({ 
-      orderId: activeOrder.orderId, 
-      newStatus,
-      orderCollection: rider?.currentOrderCollection ?? "orders", // ← ADD THIS
-    });
-  } catch (err) {
-    console.error("[RiderDashboard] updateOrderStatus error:", err);
-  }
-  setUpdatingStatus(false);
-};
+    if (!activeOrder || updatingStatus) return;
+    if (activeOrder.status === newStatus) return;
+    if (activeOrder.status === "delivered") return;
+    setUpdatingStatus(true);
+    try {
+      const fn = httpsCallable(functions, "updateOrderStatus");
+      await fn({
+        orderId: activeOrder.orderId,
+        newStatus,
+        orderCollection: rider?.currentOrderCollection ?? "orders",
+      });
+    } catch (err) {
+      console.error("[RiderDashboard] updateOrderStatus error:", err);
+    }
+    setUpdatingStatus(false);
+  };
 
- const handleTabChange = (idx: number) => {
-  if (idx === 3) { navigate("/rider/profile", { replace: true }); return; }
-  setTab(idx);
-};
+  // KEY FIX: no navigate() — tab 3 renders inline
+  const handleTabChange = (idx: number) => setTab(idx);
 
   const toggleOnline = async () => {
     if (!rider || togglingOnline) return;
@@ -314,8 +369,8 @@ useEffect(() => {
             <p style={{ color: tk.textSub, fontSize: 14, fontFamily: "'DM Sans',sans-serif" }}>{rider.rejectionReason}</p>
           </div>
         )}
-        <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
-          <button onClick={() => navigate("/rider/signup")} style={{ padding: "13px 24px", borderRadius: 12, background: `linear-gradient(135deg,${O},#FF9A00)`, border: "none", color: "#fff", fontSize: 14, fontWeight: 800, cursor: "pointer", fontFamily: "'Syne',sans-serif" }}>Fix & Resubmit</button>
+        <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" as const }}>
+          <button onClick={() => window.location.href = "/rider/signup"} style={{ padding: "13px 24px", borderRadius: 12, background: `linear-gradient(135deg,${O},#FF9A00)`, border: "none", color: "#fff", fontSize: 14, fontWeight: 800, cursor: "pointer", fontFamily: "'Syne',sans-serif" }}>Fix &amp; Resubmit</button>
           <button onClick={() => signOut(auth)} style={{ padding: "13px 24px", borderRadius: 12, background: tk.card, border: `1px solid ${tk.cardBorder}`, color: tk.textSub, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>Sign Out</button>
         </div>
       </div>
@@ -332,47 +387,22 @@ useEffect(() => {
     ["rider_assigned", "picked_up", "arriving"].includes(activeOrder.status) &&
     activeOrder.riderAccepted;
 
+  const fmt = (n: number) => `₦${n.toLocaleString("en-NG", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
   return (
     <div style={{ minHeight: "100dvh", background: tk.bg, fontFamily: "'Syne',sans-serif", paddingBottom: activeOrder ? 200 : 90, maxWidth: 480, margin: "0 auto", transition: "background 0.3s" }}>
       <style>{BASE_CSS}</style>
 
-    {/* ── MAINTENANCE BANNER ── */}
-    {maintenanceBanner?.active && !bannerDismissed && (
-  <div style={{
-    background: "linear-gradient(90deg,#7f1d1d,#991b1b)",
-    color: "white",
-    padding: "12px 18px",
-    display: "flex",
-    alignItems: "center",
-    gap: 10,
-    fontSize: 13,
-    fontWeight: 700,
-    position: "sticky",
-    top: 0,
-    zIndex: 9999,
-    fontFamily: "'DM Sans', sans-serif",  // ← ADD THIS
-  }}>
-    🔧
-    <span style={{ flex: 1 }}>{maintenanceBanner.message}</span>
-    <button
-      onClick={dismissBanner}
-      style={{
-        background: "rgba(255,255,255,0.15)",
-        border: "1px solid rgba(255,255,255,0.3)",
-        borderRadius: 8,
-        color: "white",
-        cursor: "pointer",
-        padding: "4px 10px",
-        fontSize: 12,
-        fontWeight: 700,
-        flexShrink: 0,
-      }}
-    >
-      ✕ Dismiss
-    </button>
-  </div>
-)}
-
+      {/* MAINTENANCE BANNER */}
+      {maintenanceBanner?.active && !bannerDismissed && (
+        <div style={{ background: "linear-gradient(90deg,#7f1d1d,#991b1b)", color: "white", padding: "12px 18px", display: "flex", alignItems: "center", gap: 10, fontSize: 13, fontWeight: 700, position: "sticky", top: 0, zIndex: 9999, fontFamily: "'DM Sans', sans-serif" }}>
+          🔧
+          <span style={{ flex: 1 }}>{maintenanceBanner.message}</span>
+          <button onClick={dismissBanner} style={{ background: "rgba(255,255,255,0.15)", border: "1px solid rgba(255,255,255,0.3)", borderRadius: 8, color: "white", cursor: "pointer", padding: "4px 10px", fontSize: 12, fontWeight: 700, flexShrink: 0 }}>
+            ✕ Dismiss
+          </button>
+        </div>
+      )}
 
       {/* Header */}
       <div style={{ padding: "14px 20px 12px", display: "flex", alignItems: "center", justifyContent: "space-between", background: tk.headerBg, backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)", position: "sticky", top: 0, zIndex: 50, borderBottom: `1px solid ${tk.cardBorder}`, transition: "background 0.3s" }}>
@@ -396,8 +426,7 @@ useEffect(() => {
             {activeOrder.status === "processing" ? "Vendor is preparing…" :
              activeOrder.status === "ready"      ? "Order ready — go pick up!" :
              activeOrder.status === "picked_up"  ? "Heading to customer" :
-             activeOrder.status === "arriving"   ? "Almost there!" :
-             "Active delivery"}
+             activeOrder.status === "arriving"   ? "Almost there!" : "Active delivery"}
           </span>
           <span style={{ fontSize: 11, fontWeight: 800, color: O, fontFamily: "'DM Sans',sans-serif" }}>
             Tap to navigate →
@@ -405,49 +434,27 @@ useEffect(() => {
         </div>
       )}
 
-      {/* HOME TAB */}
+      {/* ── HOME TAB ── */}
       {tab === 0 && (
-        <div style={{ animation: "fadeIn 0.4s both" }}>
+        <div style={{ animation: "fadeIn 0.3s both" }}>
           {/* Notification permission banner */}
-{typeof Notification !== "undefined" && Notification.permission !== "granted" && (
-  <div style={{
-    margin: "12px 16px 0",
-    background: "rgba(255,107,0,0.1)",
-    border: "1px solid rgba(255,107,0,0.3)",
-    borderRadius: 14,
-    padding: "12px 16px",
-    display: "flex",
-    alignItems: "center",
-    gap: 10,
-  }}>
-    <span style={{ fontSize: 20, flexShrink: 0 }}>🔔</span>
-    <div style={{ flex: 1 }}>
-      <div style={{ fontSize: 13, fontWeight: 700, color: O, fontFamily: "'DM Sans',sans-serif" }}>
-        Enable notifications
-      </div>
-      <div style={{ fontSize: 11, color: tk.textSub, fontFamily: "'DM Sans',sans-serif", marginTop: 2 }}>
-        You'll miss new order alerts without this
-      </div>
-    </div>
-    <button
-      onClick={async () => {
-        const perm = await Notification.requestPermission();
-        if (perm === "denied") {
-          alert("Notifications blocked. Go to Chrome Settings → Site Settings → Notifications → allow this site.");
-        }
-      }}
-      style={{
-        background: O, color: "white", border: "none",
-        borderRadius: 10, padding: "8px 14px",
-        fontWeight: 800, fontSize: 12,
-        cursor: "pointer", flexShrink: 0,
-        fontFamily: "'DM Sans',sans-serif",
-      }}
-    >
-      Enable
-    </button>
-  </div>
-)}
+          {typeof Notification !== "undefined" && Notification.permission !== "granted" && (
+            <div style={{ margin: "12px 16px 0", background: "rgba(255,107,0,0.1)", border: "1px solid rgba(255,107,0,0.3)", borderRadius: 14, padding: "12px 16px", display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ fontSize: 20, flexShrink: 0 }}>🔔</span>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: O, fontFamily: "'DM Sans',sans-serif" }}>Enable notifications</div>
+                <div style={{ fontSize: 11, color: tk.textSub, fontFamily: "'DM Sans',sans-serif", marginTop: 2 }}>You'll miss new order alerts without this</div>
+              </div>
+              <button
+                onClick={async () => {
+                  const perm = await Notification.requestPermission();
+                  if (perm === "denied") alert("Notifications blocked. Go to Chrome Settings → Site Settings → Notifications → allow this site.");
+                }}
+                style={{ background: O, color: "white", border: "none", borderRadius: 10, padding: "8px 14px", fontWeight: 800, fontSize: 12, cursor: "pointer", flexShrink: 0, fontFamily: "'DM Sans',sans-serif" }}
+              >Enable</button>
+            </div>
+          )}
+
           <div style={{ padding: "24px 20px 16px" }}>
             <p style={{ fontSize: 13, color: tk.textSub, fontFamily: "'DM Sans',sans-serif", marginBottom: 4 }}>{timeOfDay()} 👋</p>
             <h1 style={{ fontSize: 26, fontWeight: 900, color: tk.text, letterSpacing: "-0.8px", lineHeight: 1.1 }}>{rider.firstName} {rider.lastName}</h1>
@@ -478,21 +485,30 @@ useEffect(() => {
             ].map(s => (
               <div key={s.label} style={{ background: tk.card, border: `1px solid ${tk.cardBorder}`, borderRadius: 16, padding: "16px 14px", textAlign: "center" }}>
                 <div style={{ fontSize: 22, fontWeight: 900, color: s.color || tk.text }}>{s.val}</div>
-                <div style={{ fontSize: 10, fontWeight: 700, color: tk.textMuted, textTransform: "uppercase", letterSpacing: 0.5, fontFamily: "'DM Sans',sans-serif", marginTop: 4 }}>{s.label}</div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: tk.textMuted, textTransform: "uppercase" as const, letterSpacing: 0.5, fontFamily: "'DM Sans',sans-serif", marginTop: 4 }}>{s.label}</div>
               </div>
             ))}
           </div>
 
-          {/* Earnings */}
+          {/* ── Earnings card — reads from Firestore ── */}
           <div style={{ margin: "0 20px 20px", borderRadius: 18, background: tk.earningsBg, border: `1px solid ${O}22`, padding: 20 }}>
-            <div style={{ fontSize: 11, fontWeight: 800, color: tk.textMuted, textTransform: "uppercase", letterSpacing: 1, fontFamily: "'DM Sans',sans-serif", marginBottom: 6 }}>Today's Earnings</div>
-            <div style={{ fontSize: 36, fontWeight: 900, color: tk.text, letterSpacing: "-1px" }}><span style={{ fontSize: 18, color: O }}>₦</span>0.00</div>
-            <div style={{ fontSize: 12, color: tk.textMuted, marginTop: 6, fontFamily: "'DM Sans',sans-serif" }}>Complete deliveries to start earning</div>
+            <div style={{ fontSize: 11, fontWeight: 800, color: tk.textMuted, textTransform: "uppercase" as const, letterSpacing: 1, fontFamily: "'DM Sans',sans-serif", marginBottom: 6 }}>Today's Earnings</div>
+            <div style={{ fontSize: 36, fontWeight: 900, color: tk.text, letterSpacing: "-1px" }}>
+              <span style={{ fontSize: 18, color: O }}>₦</span>
+              {earnings.today.toLocaleString("en-NG", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </div>
+            <div style={{ fontSize: 12, color: tk.textMuted, marginTop: 6, fontFamily: "'DM Sans',sans-serif" }}>
+              {earnings.today === 0 ? "Complete deliveries to start earning" : `From ${earnings.orders} delivered order${earnings.orders !== 1 ? "s" : ""}`}
+            </div>
             <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
-              {[["₦0", "This Week"], ["₦0", "This Month"], ["0", "Orders"]].map(([v, l]) => (
+              {[
+                [fmt(earnings.week),  "This Week"],
+                [fmt(earnings.month), "This Month"],
+                [String(earnings.orders), "Orders"],
+              ].map(([v, l]) => (
                 <div key={l} style={{ flex: 1, background: tk.card, border: `1px solid ${tk.cardBorder}`, borderRadius: 12, padding: "10px 12px", textAlign: "center" }}>
-                  <div style={{ fontSize: 16, fontWeight: 800, color: tk.text }}>{v}</div>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: tk.textMuted, textTransform: "uppercase", letterSpacing: 0.5, fontFamily: "'DM Sans',sans-serif", marginTop: 2 }}>{l}</div>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: tk.text }}>{v}</div>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: tk.textMuted, textTransform: "uppercase" as const, letterSpacing: 0.5, fontFamily: "'DM Sans',sans-serif", marginTop: 2 }}>{l}</div>
                 </div>
               ))}
             </div>
@@ -500,7 +516,7 @@ useEffect(() => {
 
           {/* Account Info */}
           <div style={{ padding: "0 20px", marginBottom: 10 }}>
-            <p style={{ fontSize: 11, fontWeight: 800, color: tk.textMuted, textTransform: "uppercase", letterSpacing: 1, fontFamily: "'DM Sans',sans-serif" }}>Account Info</p>
+            <p style={{ fontSize: 11, fontWeight: 800, color: tk.textMuted, textTransform: "uppercase" as const, letterSpacing: 1, fontFamily: "'DM Sans',sans-serif" }}>Account Info</p>
           </div>
           <div style={{ background: tk.card, border: `1px solid ${tk.cardBorder}`, borderRadius: 16, overflow: "hidden", margin: "0 20px 20px" }}>
             {[
@@ -510,7 +526,7 @@ useEffect(() => {
               [<RiPhoneLine size={14} color={O} />, "Phone", `+234 ${rider.phone}`],
             ].map(([icon, label, val], i, arr) => (
               <div key={label as string} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", borderBottom: i < arr.length - 1 ? `1px solid ${tk.rowBorder}` : "none", gap: 12 }}>
-                <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: tk.textSub, fontFamily: "'DM Sans',sans-serif", fontWeight: 600 }}>{icon}{label}</span>
+                <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: tk.textSub, fontFamily: "'DM Sans',sans-serif", fontWeight: 600 }}>{icon}{label as string}</span>
                 {typeof val === "string" ? <span style={{ fontSize: 13, fontWeight: 700, color: tk.text, fontFamily: "'DM Sans',sans-serif" }}>{val}</span> : val}
               </div>
             ))}
@@ -518,21 +534,28 @@ useEffect(() => {
         </div>
       )}
 
-      {/* EARNINGS TAB */}
-{tab === 1 && (
-  <div style={{ animation: "fadeIn 0.4s both" }}>
-    <RiderPayoutsPage />
-  </div>
-)}
+      {/* ── EARNINGS TAB ── */}
+      {tab === 1 && (
+        <div style={{ animation: "fadeIn 0.3s both" }}>
+          <RiderPayoutsPage />
+        </div>
+      )}
 
-      {/* HISTORY TAB */}
+      {/* ── HISTORY TAB ── */}
       {tab === 2 && (
-        <div style={{ animation: "fadeIn 0.4s both" }}>
+        <div style={{ animation: "fadeIn 0.3s both" }}>
           <div style={{ padding: "24px 20px 8px" }}>
             <h2 style={{ fontSize: 22, fontWeight: 900, color: tk.text, letterSpacing: "-0.5px" }}>Delivery History</h2>
             <p style={{ fontSize: 13, color: tk.textSub, fontFamily: "'DM Sans',sans-serif", marginTop: 4 }}>Your accepted, rejected and reassigned orders</p>
           </div>
           <RiderOrderHistory />
+        </div>
+      )}
+
+      {/* ── SETTINGS / PROFILE TAB — no route, renders inline ── */}
+      {tab === 3 && (
+        <div style={{ animation: "fadeIn 0.3s both" }}>
+          <RiderSettingsTab />
         </div>
       )}
 
@@ -543,40 +566,41 @@ useEffect(() => {
 
       {/* Active order panel */}
       {activeOrder && !incomingOrder && !showNavMap && (
-   <ActiveOrderPanel
-  order={activeOrder}
-  onUpdateStatus={handleUpdateStatus}
-  onNavigate={() => setShowNavMap(true)}
-  onDismiss={() => setActiveOrder(null)}
-  loading={updatingStatus}
-  orderCollection={rider?.currentOrderCollection ?? "orders"}
-/>
-)}
+        <ActiveOrderPanel
+          order={activeOrder}
+          onUpdateStatus={handleUpdateStatus}
+          onNavigate={() => setShowNavMap(true)}
+          onDismiss={() => setActiveOrder(null)}
+          loading={updatingStatus}
+          orderCollection={rider?.currentOrderCollection ?? "orders"}
+        />
+      )}
 
-  
-{showNavMap && activeOrder && (
-  <RiderNavigationMap
-    orderId={activeOrder.orderId}
-    orderStatus={activeOrder.status}
-    orderCollection={rider?.currentOrderCollection ?? "orders"} // ← ADD
-    vendorLat={activeOrder.vendorLat}
-    vendorLng={activeOrder.vendorLng}
-    vendorName={activeOrder.vendorName}
-    destLat={activeOrder.destLat ?? 6.5244}
-    destLng={activeOrder.destLng ?? 3.3792}
-    destAddress={activeOrder.destAddress}
-    onClose={() => setShowNavMap(false)}
-    onStatusUpdate={(newStatus) => {
-      setShowNavMap(false);
-      handleUpdateStatus(newStatus);
-    }}
-  />
-)}
+      {showNavMap && activeOrder && (
+        <RiderNavigationMap
+          orderId={activeOrder.orderId}
+          orderStatus={activeOrder.status}
+          orderCollection={rider?.currentOrderCollection ?? "orders"}
+          vendorLat={activeOrder.vendorLat}
+          vendorLng={activeOrder.vendorLng}
+          vendorName={activeOrder.vendorName}
+          destLat={activeOrder.destLat ?? 6.5244}
+          destLng={activeOrder.destLng ?? 3.3792}
+          destAddress={activeOrder.destAddress}
+          onClose={() => setShowNavMap(false)}
+          onStatusUpdate={(newStatus) => {
+            setShowNavMap(false);
+            handleUpdateStatus(newStatus);
+          }}
+        />
+      )}
 
       <BottomNav activeTab={tab} onTabChange={handleTabChange} />
     </div>
   );
 }
+
+// ─── DeliveredPanel ───────────────────────────────────────────────────────────
 
 function DeliveredPanel({ onDismiss }: { onDismiss: () => void }) {
   const [secs, setSecs] = useState(10);
@@ -593,36 +617,28 @@ function DeliveredPanel({ onDismiss }: { onDismiss: () => void }) {
 
   return (
     <div style={{ position: "relative", textAlign: "center", padding: "16px 14px", background: "rgba(16,185,129,0.1)", borderRadius: 16, border: "1px solid rgba(16,185,129,0.25)" }}>
-      <button
-        onClick={onDismiss}
-        style={{ position: "absolute", top: 10, right: 10, width: 26, height: 26, borderRadius: "50%", background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.15)", color: "#66668a", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, lineHeight: 1 }}
-      >
+      <button onClick={onDismiss} style={{ position: "absolute", top: 10, right: 10, width: 26, height: 26, borderRadius: "50%", background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.15)", color: "#66668a", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, lineHeight: 1 }}>
         ✕
       </button>
       <div style={{ fontSize: 28, marginBottom: 6 }}>🎉</div>
-      <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 16, fontWeight: 900, color: "#10B981", marginBottom: 6 }}>
-        Delivered! Great work today.
-      </div>
-      <div style={{ fontSize: 12, color: "#44445a", fontWeight: 600 }}>
-        Closing in {secs}s…
-      </div>
+      <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 16, fontWeight: 900, color: "#10B981", marginBottom: 6 }}>Delivered! Great work today.</div>
+      <div style={{ fontSize: 12, color: "#44445a", fontWeight: 600 }}>Closing in {secs}s…</div>
     </div>
   );
 }
 
 // ─── ActiveOrderPanel ─────────────────────────────────────────────────────────
+
 type ActiveOrderPanelProps = {
   order: ActiveOrder;
   onUpdateStatus: (s: "picked_up" | "arriving" | "delivered") => void;
   onNavigate: () => void;
-  onDismiss: () => void;  // ← ADD
-   orderCollection?: string;
+  onDismiss: () => void;
+  orderCollection?: string;
   loading: boolean;
 };
 
-const STATUS_NEXT: Record<string, {
-  label: string; next: "picked_up" | "arriving" | "delivered"; emoji: string;
-} | null> = {
+const STATUS_NEXT: Record<string, { label: string; next: "picked_up" | "arriving" | "delivered"; emoji: string } | null> = {
   rider_assigned: { label: "Mark as Picked Up", next: "picked_up",  emoji: "📦" },
   processing:     { label: "Mark as Picked Up", next: "picked_up",  emoji: "📦" },
   ready:          { label: "Mark as Picked Up", next: "picked_up",  emoji: "📦" },
@@ -632,7 +648,7 @@ const STATUS_NEXT: Record<string, {
 };
 
 export function ActiveOrderPanel({ order, onUpdateStatus, onNavigate, onDismiss, orderCollection, loading }: ActiveOrderPanelProps) {
-const next = STATUS_NEXT[order.status];
+  const next = STATUS_NEXT[order.status];
   const isActiveStage = ["rider_assigned","processing","ready","picked_up","arriving","delivered"].includes(order.status);
   if (!isActiveStage) return null;
 
@@ -641,170 +657,89 @@ const next = STATUS_NEXT[order.status];
   const isDelivered = order.status === "delivered";
   const isArriving  = order.status === "arriving";
 
-  // Statuses where rider needs to show their pickup code to vendor
- const showPickupCode = order.riderPickupCode &&
-  ["rider_assigned", "processing", "ready"].includes(order.status) &&
-  orderCollection !== "deliveryRequests";
+  const showPickupCode = order.riderPickupCode &&
+    ["rider_assigned", "processing", "ready"].includes(order.status) &&
+    orderCollection !== "deliveryRequests";
 
   return (
     <>
       <style>{`
-        @keyframes aop-in {
-          from { opacity:0; transform:translateY(100%); }
-          to   { opacity:1; transform:translateY(0); }
-        }
-        @keyframes aop-code-in {
-          from { opacity:0; transform:translateY(6px); }
-          to   { opacity:1; transform:translateY(0); }
-        }
+        @keyframes aop-in { from{opacity:0;transform:translateY(100%)} to{opacity:1;transform:translateY(0)} }
+        @keyframes aop-code-in { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
         .aop-root {
-          position: fixed;
-          bottom: 0; left: 0; right: 0;
-          z-index: 200;
-          background: #111118;
-          border-top: 2px solid rgba(255,107,0,0.3);
-          border-radius: 24px 24px 0 0;
-          padding: 16px 16px calc(80px + env(safe-area-inset-bottom, 0px)) 16px;
-          box-shadow: 0 -8px 40px rgba(0,0,0,0.6), 0 -2px 0 rgba(255,107,0,0.2);
-          animation: aop-in 0.35s cubic-bezier(.34,1.1,.64,1) both;
-          display: flex;
-          flex-direction: column;
-          gap: 12px;
+          position:fixed; bottom:0; left:0; right:0; z-index:200;
+          background:#111118; border-top:2px solid rgba(255,107,0,0.3);
+          border-radius:24px 24px 0 0;
+          padding:16px 16px calc(80px + env(safe-area-inset-bottom,0px)) 16px;
+          box-shadow:0 -8px 40px rgba(0,0,0,0.6),0 -2px 0 rgba(255,107,0,0.2);
+          animation:aop-in 0.35s cubic-bezier(.34,1.1,.64,1) both;
+          display:flex; flex-direction:column; gap:12px;
         }
-        .aop-handle {
-          width: 40px; height: 4px; border-radius: 2px;
-          background: rgba(255,255,255,0.12);
-          margin: 0 auto 4px;
-        }
-        .aop-row { display:flex; align-items:center; justify-content:space-between; gap:8px; }
-        .aop-label { font-size:10px; font-weight:800; color:#FF6B00; text-transform:uppercase; letter-spacing:.8px; font-family:'DM Sans',sans-serif; }
-        .aop-vendor { font-size:16px; font-weight:900; color:#eeeef8; font-family:'Syne',sans-serif; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:200px; }
-        .aop-fee { font-size:12px; color:#FF9A00; font-weight:700; font-family:'DM Sans',sans-serif; margin-top:2px; }
-        .aop-pickup-code {
-          padding: 12px 14px; border-radius: 14px;
-          background: rgba(139,92,246,0.08);
-          border: 1.5px solid rgba(139,92,246,0.3);
-          display: flex; align-items: center; justify-content: space-between; gap: 12px;
-          animation: aop-code-in .3s ease;
-        }
-        .aop-code-label { font-size:10px; font-weight:800; color:#8B5CF6; text-transform:uppercase; letter-spacing:.6px; font-family:'DM Sans',sans-serif; margin-bottom:4px; }
-        .aop-code-val { font-family:'Syne',sans-serif; font-size:30px; font-weight:900; color:#8B5CF6; letter-spacing:8px; }
-        .aop-info-banner { padding:10px 14px; border-radius:12px; font-size:13px; font-weight:700; display:flex; align-items:center; gap:8px; }
-        .aop-btns { display:flex; gap:10px; width:100%; }
-        .aop-nav-btn {
-          flex:1; height:56px; border-radius:16px;
-          background:rgba(255,107,0,0.12); border:2px solid rgba(255,107,0,0.4);
-          color:#FF6B00; font-family:'Syne',sans-serif; font-size:14px; font-weight:900;
-          cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px;
-          -webkit-tap-highlight-color:transparent; touch-action:manipulation; min-width:0;
-        }
+        .aop-handle { width:40px;height:4px;border-radius:2px;background:rgba(255,255,255,0.12);margin:0 auto 4px; }
+        .aop-btns { display:flex;gap:10px;width:100%; }
+        .aop-nav-btn { flex:1;height:56px;border-radius:16px;background:rgba(255,107,0,0.12);border:2px solid rgba(255,107,0,0.4);color:#FF6B00;font-family:'Syne',sans-serif;font-size:14px;font-weight:900;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;-webkit-tap-highlight-color:transparent;touch-action:manipulation;min-width:0; }
         .aop-nav-btn:active { transform:scale(0.96); }
-        .aop-action-btn {
-          flex:2; height:56px; border-radius:16px; border:none;
-          font-family:'Syne',sans-serif; font-size:14px; font-weight:900;
-          cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;
-          -webkit-tap-highlight-color:transparent; touch-action:manipulation; min-width:0;
-          letter-spacing:-0.2px;
-        }
+        .aop-action-btn { flex:2;height:56px;border-radius:16px;border:none;font-family:'Syne',sans-serif;font-size:14px;font-weight:900;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;-webkit-tap-highlight-color:transparent;touch-action:manipulation;min-width:0; }
         .aop-action-btn:active:not(:disabled) { transform:scale(0.96); }
         .aop-action-btn:disabled { cursor:not-allowed; }
-        .aop-arriving-hint {
-          padding: 10px 14px; border-radius: 12px;
-          background: rgba(139,92,246,0.08); border: 1px solid rgba(139,92,246,0.25);
-          font-size: 13px; font-weight: 700; color: #a78bfa;
-          display: flex; align-items: center; gap: 8px;
-        }
+        .aop-pickup-code { padding:12px 14px;border-radius:14px;background:rgba(139,92,246,0.08);border:1.5px solid rgba(139,92,246,0.3);display:flex;align-items:center;justify-content:space-between;gap:12px;animation:aop-code-in .3s ease; }
       `}</style>
 
       <div className="aop-root">
         <div className="aop-handle" />
 
-        {/* Info row */}
-        <div className="aop-row">
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div className="aop-label">Active Delivery</div>
-            <div className="aop-vendor">{order.vendorName ?? "Delivery in progress"}</div>
+            <div style={{ fontSize: 10, fontWeight: 800, color: O, textTransform: "uppercase" as const, letterSpacing: ".8px", fontFamily: "'DM Sans',sans-serif" }}>Active Delivery</div>
+            <div style={{ fontSize: 16, fontWeight: 900, color: "#eeeef8", fontFamily: "'Syne',sans-serif", whiteSpace: "nowrap" as const, overflow: "hidden", textOverflow: "ellipsis", maxWidth: 200 }}>{order.vendorName ?? "Delivery in progress"}</div>
             {order.deliveryFee && order.deliveryFee > 0 && (
-              <div className="aop-fee">Est. earning: ₦{order.deliveryFee.toLocaleString("en-NG")}</div>
+              <div style={{ fontSize: 12, color: "#FF9A00", fontWeight: 700, fontFamily: "'DM Sans',sans-serif", marginTop: 2 }}>Est. earning: ₦{order.deliveryFee.toLocaleString("en-NG")}</div>
             )}
           </div>
           <StatusBadge status={order.status} />
         </div>
 
-        {/* ── Rider pickup code — show to vendor before pickup ── */}
         {showPickupCode && (
           <div className="aop-pickup-code">
             <div>
-              <div className="aop-code-label">Your Pickup Code — show to vendor</div>
-              <div className="aop-code-val">{order.riderPickupCode}</div>
+              <div style={{ fontSize: 10, fontWeight: 800, color: "#8B5CF6", textTransform: "uppercase" as const, letterSpacing: ".6px", fontFamily: "'DM Sans',sans-serif", marginBottom: 4 }}>Your Pickup Code — show to vendor</div>
+              <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 30, fontWeight: 900, color: "#8B5CF6", letterSpacing: 8 }}>{order.riderPickupCode}</div>
             </div>
             <div style={{ fontSize: 28, flexShrink: 0 }}>🔑</div>
           </div>
         )}
 
-             {isDelivered ? (
-         <DeliveredPanel onDismiss={onDismiss} />
-
+        {isDelivered ? (
+          <DeliveredPanel onDismiss={onDismiss} />
         ) : isArriving ? (
-          /* When arriving — code verification is done in nav map */
           <>
-            <div className="aop-arriving-hint">
+            <div style={{ padding: "10px 14px", borderRadius: 12, background: "rgba(139,92,246,0.08)", border: "1px solid rgba(139,92,246,0.25)", fontSize: 13, fontWeight: 700, color: "#a78bfa", display: "flex", alignItems: "center", gap: 8 }}>
               🔐 Ask customer for their delivery code — open navigation to verify
             </div>
             <div className="aop-btns">
-              <button className="aop-nav-btn" onClick={onNavigate}>
-                🗺️ Navigate
-              </button>
-              <button
-                className="aop-action-btn"
-                onClick={onNavigate}
-                style={{ background: "linear-gradient(135deg,#8B5CF6,#7C3AED)", color: "#fff", boxShadow: "0 4px 20px rgba(139,92,246,0.4)" }}
-              >
+              <button className="aop-nav-btn" onClick={onNavigate}>🗺️ Navigate</button>
+              <button className="aop-action-btn" onClick={onNavigate} style={{ background: "linear-gradient(135deg,#8B5CF6,#7C3AED)", color: "#fff", boxShadow: "0 4px 20px rgba(139,92,246,0.4)" }}>
                 🔐 Verify Code
               </button>
             </div>
           </>
-
         ) : (isWaiting || isReady) ? (
           <>
-            <div className="aop-info-banner" style={{
-              background: isReady ? "rgba(16,185,129,0.08)" : "rgba(59,130,246,0.08)",
-              border: `1px solid ${isReady ? "rgba(16,185,129,0.25)" : "rgba(59,130,246,0.2)"}`,
-              color: isReady ? "#10b981" : "#60a5fa",
-            }}>
+            <div style={{ padding: "10px 14px", borderRadius: 12, background: isReady ? "rgba(16,185,129,0.08)" : "rgba(59,130,246,0.08)", border: `1px solid ${isReady ? "rgba(16,185,129,0.25)" : "rgba(59,130,246,0.2)"}`, color: isReady ? "#10b981" : "#60a5fa", fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", gap: 8 }}>
               {isReady ? "✅ Order ready — head to vendor and pick up" : "⏳ Vendor is preparing the order — wait nearby"}
             </div>
             <div className="aop-btns">
               <button className="aop-nav-btn" onClick={onNavigate}>🗺️ Navigate</button>
-              <button
-                className="aop-action-btn"
-                onClick={() => next && onUpdateStatus(next.next)}
-                disabled={loading || isWaiting}
-                style={{
-                  background: isWaiting ? "#1e1e2c" : "linear-gradient(135deg,#FF6B00,#FF9A00)",
-                  color: isWaiting ? "#555" : "#fff",
-                  boxShadow: isWaiting ? "none" : "0 4px 20px rgba(255,107,0,0.4)",
-                }}
-              >
+              <button className="aop-action-btn" onClick={() => next && onUpdateStatus(next.next)} disabled={loading || isWaiting} style={{ background: isWaiting ? "#1e1e2c" : "linear-gradient(135deg,#FF6B00,#FF9A00)", color: isWaiting ? "#555" : "#fff", boxShadow: isWaiting ? "none" : "0 4px 20px rgba(255,107,0,0.4)" }}>
                 {loading ? <Spinner /> : isWaiting ? "Waiting for vendor…" : `${next?.emoji ?? "📦"} ${next?.label ?? "Mark Picked Up"}`}
               </button>
             </div>
           </>
-
         ) : (
           <div className="aop-btns">
             <button className="aop-nav-btn" onClick={onNavigate}>🗺️ Navigate</button>
             {next && (
-              <button
-                className="aop-action-btn"
-                onClick={() => onUpdateStatus(next.next)}
-                disabled={loading}
-                style={{
-                  background: loading ? "#1e1e2c" : "linear-gradient(135deg,#FF6B00,#FF9A00)",
-                  color: "#fff",
-                  boxShadow: loading ? "none" : "0 4px 20px rgba(255,107,0,0.4)",
-                }}
-              >
+              <button className="aop-action-btn" onClick={() => onUpdateStatus(next.next)} disabled={loading} style={{ background: loading ? "#1e1e2c" : "linear-gradient(135deg,#FF6B00,#FF9A00)", color: "#fff", boxShadow: loading ? "none" : "0 4px 20px rgba(255,107,0,0.4)" }}>
                 {loading ? <Spinner /> : <>{next.emoji} {next.label}</>}
               </button>
             )}
@@ -826,23 +761,23 @@ function Spinner() {
 
 function StatusBadge({ status }: { status: string }) {
   const map: Record<string, { label: string; color: string; bg: string; border: string }> = {
-    rider_assigned: { label: "Assigned",  color: "#FF6B00", bg: "rgba(255,107,0,0.1)",  border: "rgba(255,107,0,0.3)"  },
-    processing:     { label: "Preparing", color: "#3b82f6", bg: "rgba(59,130,246,0.1)", border: "rgba(59,130,246,0.3)" },
-    ready:          { label: "Ready",     color: "#10B981", bg: "rgba(16,185,129,0.1)", border: "rgba(16,185,129,0.3)" },
-    picked_up:      { label: "Picked Up", color: "#FF6B00", bg: "rgba(255,107,0,0.12)", border: "rgba(255,107,0,0.35)" },
+    rider_assigned: { label: "Assigned",  color: "#FF6B00", bg: "rgba(255,107,0,0.1)",   border: "rgba(255,107,0,0.3)"   },
+    processing:     { label: "Preparing", color: "#3b82f6", bg: "rgba(59,130,246,0.1)",  border: "rgba(59,130,246,0.3)"  },
+    ready:          { label: "Ready",     color: "#10B981", bg: "rgba(16,185,129,0.1)",  border: "rgba(16,185,129,0.3)"  },
+    picked_up:      { label: "Picked Up", color: "#FF6B00", bg: "rgba(255,107,0,0.12)",  border: "rgba(255,107,0,0.35)"  },
     arriving:       { label: "Arriving",  color: "#8B5CF6", bg: "rgba(139,92,246,0.12)", border: "rgba(139,92,246,0.35)" },
-    delivered:      { label: "Delivered", color: "#10B981", bg: "rgba(16,185,129,0.1)", border: "rgba(16,185,129,0.3)" },
+    delivered:      { label: "Delivered", color: "#10B981", bg: "rgba(16,185,129,0.1)",  border: "rgba(16,185,129,0.3)"  },
   };
   const s = map[status] ?? { label: status, color: "#FF6B00", bg: "rgba(255,107,0,0.08)", border: "rgba(255,107,0,0.2)" };
   return (
-    <div style={{ padding: "5px 12px", borderRadius: 20, background: s.bg, color: s.color, border: `1px solid ${s.border}`, fontSize: 11, fontWeight: 800, fontFamily: "'Nunito',sans-serif", textTransform: "uppercase", letterSpacing: ".5px" }}>
+    <div style={{ padding: "5px 12px", borderRadius: 20, background: s.bg, color: s.color, border: `1px solid ${s.border}`, fontSize: 11, fontWeight: 800, fontFamily: "'DM Sans',sans-serif", textTransform: "uppercase" as const, letterSpacing: ".5px" }}>
       {s.label}
     </div>
   );
 }
 
 const BASE_CSS = `
-@import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800;900&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap');
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
-@keyframes fadeIn{from{opacity:0;transform:translateY(12px);}to{opacity:1;transform:translateY(0);}}
+  @import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800;900&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap');
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+  @keyframes fadeIn{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
 `;

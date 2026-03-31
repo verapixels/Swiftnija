@@ -1,7 +1,17 @@
 import { useState, useEffect } from "react";
 import { auth, db } from "../firebase";
-import { collection, query, where, orderBy, onSnapshot, Timestamp } from "firebase/firestore";
-import { RiCheckLine, RiCloseLine, RiRefreshLine, RiArrowLeftLine, RiTimeLine, RiStoreLine, RiMoneyDollarCircleLine, RiCalendarLine, RiHashtag } from "react-icons/ri";
+import {
+  collection, query, where, orderBy, onSnapshot, Timestamp,
+} from "firebase/firestore";
+import {
+  RiCheckLine, RiCloseLine, RiRefreshLine, RiArrowLeftLine,
+  RiTimeLine, RiStoreLine, RiMoneyDollarCircleLine, RiCalendarLine,
+  RiHashtag, RiMotorbikeLine, RiArrowRightSLine,
+  RiFileListLine, RiPieChartLine,
+} from "react-icons/ri";
+import { useTheme } from "../context/ThemeContext";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 type HistoryEntry = {
   id: string;
@@ -13,25 +23,123 @@ type HistoryEntry = {
   createdAt: Timestamp | null;
 };
 
+// ─── Constants ────────────────────────────────────────────────────────────────
+
 const ACTION_CFG = {
-  accepted:   { label: "Accepted",   color: "#10B981", bg: "rgba(16,185,129,0.08)", border: "rgba(16,185,129,0.2)", Icon: RiCheckLine },
-  rejected:   { label: "Rejected",   color: "#ef4444", bg: "rgba(239,68,68,0.08)",  border: "rgba(239,68,68,0.2)",  Icon: RiCloseLine },
-  reassigned: { label: "Reassigned", color: "#a78bfa", bg: "rgba(167,139,250,0.08)", border: "rgba(167,139,250,0.2)", Icon: RiRefreshLine },
+  accepted: {
+    label: "Accepted",
+    color: "var(--clr-accepted)",
+    bg: "var(--clr-accepted-bg)",
+    border: "var(--clr-accepted-border)",
+    Icon: RiCheckLine,
+  },
+  rejected: {
+    label: "Rejected",
+    color: "var(--clr-rejected)",
+    bg: "var(--clr-rejected-bg)",
+    border: "var(--clr-rejected-border)",
+    Icon: RiCloseLine,
+  },
+  reassigned: {
+    label: "Reassigned",
+    color: "var(--clr-reassigned)",
+    bg: "var(--clr-reassigned-bg)",
+    border: "var(--clr-reassigned-border)",
+    Icon: RiRefreshLine,
+  },
 };
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
 const fmtTs = (ts: Timestamp | null) =>
-  ts ? ts.toDate().toLocaleDateString("en-NG", {
-    day: "2-digit", month: "short", year: "numeric",
-    hour: "2-digit", minute: "2-digit",
-  }) : "—";
+  ts
+    ? ts.toDate().toLocaleDateString("en-NG", {
+        day: "2-digit", month: "short", year: "numeric",
+        hour: "2-digit", minute: "2-digit",
+      })
+    : "—";
 
 const fmtDate = (ts: Timestamp | null) =>
-  ts ? ts.toDate().toLocaleDateString("en-NG", { day: "2-digit", month: "short", year: "numeric" }) : "—";
+  ts
+    ? ts.toDate().toLocaleDateString("en-NG", {
+        day: "2-digit", month: "short", year: "numeric",
+      })
+    : "—";
 
 const fmtTime = (ts: Timestamp | null) =>
-  ts ? ts.toDate().toLocaleTimeString("en-NG", { hour: "2-digit", minute: "2-digit" }) : "—";
+  ts
+    ? ts.toDate().toLocaleTimeString("en-NG", { hour: "2-digit", minute: "2-digit" })
+    : "—";
+
+function statusColor(status: string): string {
+  if (!status) return "var(--clr-text-muted)";
+  if (status === "delivered") return "var(--clr-accepted)";
+  if (status === "cancelled") return "var(--clr-rejected)";
+  if (status.includes("rider")) return "var(--clr-brand)";
+  return "var(--clr-reassigned)";
+}
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
+function DetailRow({
+  icon, label, value, mono = false, highlight = false, sc,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  mono?: boolean;
+  highlight?: boolean;
+  sc?: string;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 14,
+        padding: "13px 16px",
+        borderRadius: 14,
+        background: highlight ? "var(--clr-accepted-bg)" : "var(--clr-surface-raised)",
+        border: `1px solid ${highlight ? "var(--clr-accepted-border)" : "var(--clr-border)"}`,
+        transition: "background 0.2s",
+      }}
+    >
+      <div style={{ flexShrink: 0, width: 22, display: "flex", justifyContent: "center" }}>
+        {icon}
+      </div>
+      <div style={{ fontSize: 12, fontWeight: 600, color: "var(--clr-text-muted)", flex: 1 }}>
+        {label}
+      </div>
+      <div
+        style={{
+          fontSize: highlight ? 17 : 13,
+          fontWeight: highlight ? 900 : 700,
+          color: sc ?? (highlight ? "var(--clr-accepted)" : "var(--clr-text)"),
+          fontFamily: mono ? "'Syne', sans-serif" : "inherit",
+          textTransform: sc ? "capitalize" : "none",
+          letterSpacing: highlight ? "-0.3px" : "normal",
+        }}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function SkeletonRow() {
+  return (
+    <div
+      className="roh-skeleton"
+      style={{ height: 80, borderRadius: 18 }}
+    />
+  );
+}
+
+// ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function RiderOrderHistory() {
+  const { theme } = useTheme();
+
   const [orders,   setOrders]   = useState<HistoryEntry[]>([]);
   const [loading,  setLoading]  = useState(true);
   const [filter,   setFilter]   = useState<"all" | "accepted" | "rejected" | "reassigned">("all");
@@ -39,16 +147,17 @@ export default function RiderOrderHistory() {
 
   const uid = auth.currentUser?.uid;
 
+  /* ── Firebase listeners ── */
   useEffect(() => {
     if (!uid) return;
 
-    const q = query(
+    const q1 = query(
       collection(db, "orders"),
       where("riderId", "==", uid),
       orderBy("createdAt", "desc"),
     );
 
-    const unsub = onSnapshot(q, snap => {
+    const unsub1 = onSnapshot(q1, snap => {
       const results: HistoryEntry[] = [];
       snap.forEach(d => {
         const data = d.data();
@@ -57,7 +166,7 @@ export default function RiderOrderHistory() {
         const wasRejected   = rejectedBy.includes(uid) && !data.riderAccepted;
         const wasAccepted   = data.riderAccepted === true && data.riderId === uid;
         let action: "accepted" | "rejected" | "reassigned";
-        if (wasReassigned) action = "reassigned";
+        if (wasReassigned)    action = "reassigned";
         else if (wasRejected) action = "rejected";
         else if (wasAccepted) action = "accepted";
         else return;
@@ -98,15 +207,13 @@ export default function RiderOrderHistory() {
             createdAt: data.createdAt ?? null,
           });
         });
-        return [...prev, ...newEntries].sort((a, b) => {
-          const ta = a.createdAt?.toMillis() ?? 0;
-          const tb = b.createdAt?.toMillis() ?? 0;
-          return tb - ta;
-        });
+        return [...prev, ...newEntries].sort(
+          (a, b) => (b.createdAt?.toMillis() ?? 0) - (a.createdAt?.toMillis() ?? 0),
+        );
       });
     });
 
-    return () => { unsub(); unsub2(); };
+    return () => { unsub1(); unsub2(); };
   }, [uid]);
 
   const filtered = filter === "all" ? orders : orders.filter(o => o.action === filter);
@@ -116,124 +223,106 @@ export default function RiderOrderHistory() {
     rejected:   orders.filter(o => o.action === "rejected").length,
     reassigned: orders.filter(o => o.action === "reassigned").length,
   };
-
   const totalEarned = orders
     .filter(o => o.action === "accepted")
     .reduce((s, o) => s + o.total, 0);
 
-  // ── Detail Sheet ──────────────────────────────────────────────────────────
+  /* ───────────────────── DETAIL VIEW ────────────────────── */
   if (selected) {
     const cfg = ACTION_CFG[selected.action];
     const Icon = cfg.Icon;
     return (
-      <div style={{ minHeight: "100%", fontFamily: "'DM Sans', sans-serif", background: "transparent" }}>
-        <style>{STYLES}</style>
+      <div className={`roh-root theme-${theme}`}>
+        <style>{CSS_VARS + BASE_STYLES}</style>
 
-        {/* Back header */}
-        <div style={{
-          display: "flex", alignItems: "center", gap: 12,
-          padding: "16px 20px", borderBottom: "1px solid #1a1a28",
-        }}>
-          <button
-            onClick={() => setSelected(null)}
-            style={{
-              width: 38, height: 38, borderRadius: 12,
-              background: "rgba(255,255,255,0.04)", border: "1px solid #1a1a28",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              cursor: "pointer", color: "#888", flexShrink: 0,
-            }}
-          >
-            <RiArrowLeftLine size={18} />
+        {/* Header */}
+        <div className="roh-header">
+          <button className="roh-back-btn" onClick={() => setSelected(null)}>
+            <RiArrowLeftLine size={19} />
           </button>
-          <span style={{ fontFamily: "'Syne', sans-serif", fontWeight: 800, fontSize: 16, color: "#eeeef8" }}>
-            Order Details
-          </span>
+          <span className="roh-header-title">Order Details</span>
+          <div style={{ width: 40 }} />
         </div>
 
-        <div style={{ padding: "20px 20px 80px" }}>
+        <div className="roh-detail-body">
 
-          {/* Status hero */}
-          <div style={{
-            borderRadius: 20, padding: "28px 20px", textAlign: "center",
-            background: cfg.bg, border: `1.5px solid ${cfg.border}`,
-            marginBottom: 20, position: "relative", overflow: "hidden",
-          }}>
-            <div style={{
-              position: "absolute", top: -20, right: -20,
-              width: 100, height: 100, borderRadius: "50%",
-              background: cfg.color, opacity: 0.06,
-            }} />
-            <div style={{
-              width: 60, height: 60, borderRadius: 18,
-              background: cfg.bg, border: `2px solid ${cfg.border}`,
-              display: "flex", alignItems: "center", justifyContent: "center",
-              margin: "0 auto 14px", color: cfg.color,
-            }}>
-              <Icon size={28} />
+          {/* Hero badge */}
+          <div
+            className="roh-detail-hero"
+            style={{ background: cfg.bg, border: `1.5px solid ${cfg.border}` }}
+          >
+            <div className="roh-hero-circle roh-hero-circle-1" style={{ background: cfg.color }} />
+            <div className="roh-hero-circle roh-hero-circle-2" style={{ background: cfg.color }} />
+
+            <div
+              className="roh-hero-icon"
+              style={{ background: cfg.bg, border: `2px solid ${cfg.border}`, color: cfg.color }}
+            >
+              <Icon size={30} />
             </div>
-            <div style={{
-              fontFamily: "'Syne', sans-serif", fontSize: 22,
-              fontWeight: 900, color: cfg.color, marginBottom: 6,
-            }}>
-              {cfg.label}
-            </div>
-            <div style={{ fontSize: 13, color: "#66668a", fontWeight: 600 }}>
-              Order #{selected.orderId}
-            </div>
+            <div className="roh-hero-label" style={{ color: cfg.color }}>{cfg.label}</div>
+            <div className="roh-hero-id">Order #{selected.orderId}</div>
           </div>
 
-          {/* Details grid */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
-
+          {/* Rows */}
+          <div className="roh-detail-section-label">
+            <RiFileListLine size={13} />
+            Order Summary
+          </div>
+          <div className="roh-detail-rows">
             <DetailRow
-              icon={<RiHashtag size={15} color="#FF6B00" />}
+              icon={<RiHashtag size={15} color="var(--clr-brand)" />}
               label="Order ID"
               value={`#${selected.orderId}`}
               mono
             />
             <DetailRow
-              icon={<RiStoreLine size={15} color="#FF6B00" />}
+              icon={<RiStoreLine size={15} color="var(--clr-brand)" />}
               label="Vendor"
               value={selected.vendorName}
             />
             <DetailRow
-              icon={<RiCalendarLine size={15} color="#FF6B00" />}
+              icon={<RiCalendarLine size={15} color="var(--clr-brand)" />}
               label="Date"
               value={fmtDate(selected.createdAt)}
             />
             <DetailRow
-              icon={<RiTimeLine size={15} color="#FF6B00" />}
+              icon={<RiTimeLine size={15} color="var(--clr-brand)" />}
               label="Time"
               value={fmtTime(selected.createdAt)}
             />
             {selected.action === "accepted" && selected.total > 0 && (
               <DetailRow
-                icon={<RiMoneyDollarCircleLine size={15} color="#10B981" />}
+                icon={<RiMoneyDollarCircleLine size={15} color="var(--clr-accepted)" />}
                 label="Amount"
                 value={`₦${selected.total.toLocaleString("en-NG")}`}
                 highlight
               />
             )}
             <DetailRow
-              icon={<div style={{ width: 8, height: 8, borderRadius: "50%", background: statusColor(selected.status) }} />}
+              icon={
+                <div style={{
+                  width: 9, height: 9, borderRadius: "50%",
+                  background: statusColor(selected.status),
+                  boxShadow: `0 0 6px ${statusColor(selected.status)}`,
+                }} />
+              }
               label="Final Status"
-              value={selected.status.replace(/_/g, " ")}
-              statusColor={statusColor(selected.status)}
+              value={selected.status.replace(/_/g, " ") || "—"}
+              sc={statusColor(selected.status)}
             />
           </div>
 
-          {/* Action context */}
-          <div style={{
-            padding: "16px", borderRadius: 16,
-            background: "rgba(255,255,255,0.03)", border: "1px solid #1a1a28",
-          }}>
-            <div style={{ fontSize: 11, fontWeight: 800, color: "#44445a", textTransform: "uppercase", letterSpacing: ".8px", marginBottom: 8 }}>
-              What happened
-            </div>
-            <div style={{ fontSize: 13, color: "#8888a0", lineHeight: 1.6, fontWeight: 500 }}>
-              {selected.action === "accepted" && "You accepted this order and completed the delivery."}
-              {selected.action === "rejected" && "You rejected this order. It was reassigned to another available rider."}
-              {selected.action === "reassigned" && "This order was reassigned away from you, either because you rejected it or did not respond in time."}
+          {/* Context note */}
+          <div className="roh-context-card">
+            <div className="roh-context-label">What happened</div>
+            <div className="roh-context-body">
+              {selected.action === "accepted" &&
+                "You accepted this order and successfully completed the delivery."}
+              {selected.action === "rejected" &&
+                "You rejected this order. It was reassigned to another available rider."}
+              {selected.action === "reassigned" &&
+                "This order was reassigned away from you — either you rejected it or did not respond in time."}
             </div>
           </div>
 
@@ -242,247 +331,492 @@ export default function RiderOrderHistory() {
     );
   }
 
-  // ── Main List ─────────────────────────────────────────────────────────────
+  /* ───────────────────── LIST VIEW ──────────────────────── */
   return (
-    <div style={{ fontFamily: "'DM Sans', sans-serif", background: "transparent" }}>
-      <style>{STYLES}</style>
+    <div className={`roh-root theme-${theme}`}>
+      <style>{CSS_VARS + BASE_STYLES}</style>
 
-      {/* Summary strip */}
-      <div style={{ padding: "16px 20px 0" }}>
-        <div style={{
-          borderRadius: 18, padding: "18px 20px",
-          background: "linear-gradient(135deg, rgba(255,107,0,0.1), rgba(255,107,0,0.04))",
-          border: "1px solid rgba(255,107,0,0.2)",
-          display: "flex", justifyContent: "space-between", alignItems: "center",
-          marginBottom: 16,
-        }}>
-          <div>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,107,0,0.7)", textTransform: "uppercase", letterSpacing: ".8px", marginBottom: 4 }}>
-              Total Earned
-            </div>
-            <div style={{ fontFamily: "'Syne', sans-serif", fontSize: 26, fontWeight: 900, color: "#FF6B00", letterSpacing: "-0.5px" }}>
-              ₦{totalEarned.toLocaleString("en-NG")}
-            </div>
+      {/* Page header */}
+      <div className="roh-page-header">
+        <div className="roh-page-icon">
+          <RiMotorbikeLine size={22} />
+        </div>
+        <div>
+          <div className="roh-page-title">Order History</div>
+          <div className="roh-page-sub">Your delivery activity</div>
+        </div>
+        <div className="roh-page-count-badge">{counts.all}</div>
+      </div>
+
+      {/* Earnings strip */}
+      <div className="roh-earnings-strip">
+        <div className="roh-earnings-left">
+          <div className="roh-earnings-eyebrow">
+            <RiPieChartLine size={11} /> Total Earned
           </div>
-          <div style={{ textAlign: "right" }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "#44445a", textTransform: "uppercase", letterSpacing: ".8px", marginBottom: 4 }}>
-              Total Orders
-            </div>
-            <div style={{ fontFamily: "'Syne', sans-serif", fontSize: 26, fontWeight: 900, color: "#eeeef8" }}>
-              {counts.all}
-            </div>
+          <div className="roh-earnings-amount">
+            ₦{totalEarned.toLocaleString("en-NG")}
           </div>
         </div>
+        <div className="roh-earnings-divider" />
+        <div className="roh-earnings-right">
+          <div className="roh-earnings-eyebrow" style={{ textAlign: "right" }}>Deliveries</div>
+          <div className="roh-earnings-count">{counts.accepted}</div>
+          <div className="roh-earnings-eyebrow" style={{ textAlign: "right", marginTop: 6 }}>Total</div>
+          <div className="roh-earnings-total-num">{counts.all}</div>
+        </div>
+        <div className="roh-strip-shimmer" />
+      </div>
 
-        {/* Stat pills */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 16 }}>
-          {(["accepted", "rejected", "reassigned"] as const).map(type => {
-            const cfg = ACTION_CFG[type];
-            const Icon = cfg.Icon;
-            return (
-              <div
-                key={type}
-                onClick={() => setFilter(filter === type ? "all" : type)}
-                className="stat-pill"
-                style={{
-                  borderRadius: 14, padding: "12px 10px", textAlign: "center",
-                  cursor: "pointer", transition: "all 0.2s",
-                  background: filter === type ? cfg.bg : "rgba(255,255,255,0.03)",
-                  border: `1.5px solid ${filter === type ? cfg.border : "#1a1a28"}`,
-                }}
-              >
-                <div style={{ color: cfg.color, display: "flex", justifyContent: "center", marginBottom: 6 }}>
-                  <Icon size={18} />
-                </div>
-                <div style={{ fontFamily: "'Syne', sans-serif", fontSize: 20, fontWeight: 900, color: cfg.color }}>
-                  {counts[type]}
-                </div>
-                <div style={{ fontSize: 10, fontWeight: 700, color: cfg.color, opacity: 0.7, textTransform: "uppercase", letterSpacing: ".4px", marginTop: 2 }}>
-                  {cfg.label}
-                </div>
+      {/* Stat cards */}
+      <div className="roh-stat-grid">
+        {(["accepted", "rejected", "reassigned"] as const).map(type => {
+          const cfg = ACTION_CFG[type];
+          const Icon = cfg.Icon;
+          const isActive = filter === type;
+          return (
+            <button
+              key={type}
+              className={`roh-stat-card${isActive ? " roh-stat-active" : ""}`}
+              onClick={() => setFilter(isActive ? "all" : type)}
+              style={isActive ? { background: cfg.bg, borderColor: cfg.border } : {}}
+            >
+              <div className="roh-stat-icon" style={{ color: cfg.color }}>
+                <Icon size={20} />
               </div>
-            );
-          })}
-        </div>
+              <div className="roh-stat-num" style={{ color: cfg.color }}>{counts[type]}</div>
+              <div className="roh-stat-label" style={{ color: cfg.color }}>{cfg.label}</div>
+              {isActive && (
+                <div className="roh-stat-active-dot" style={{ background: cfg.color }} />
+              )}
+            </button>
+          );
+        })}
+      </div>
 
-        {/* Filter tabs */}
-        <div style={{ display: "flex", gap: 8, marginBottom: 16, overflowX: "auto", paddingBottom: 4 }}>
-          {(["all", "accepted", "rejected", "reassigned"] as const).map(f => {
-            const isActive = filter === f;
-            return (
-              <button
-                key={f}
-                onClick={() => setFilter(f)}
-                style={{
-                  flexShrink: 0, padding: "7px 16px", borderRadius: 20,
-                  border: `1.5px solid ${isActive ? "#FF6B00" : "#1a1a28"}`,
-                  background: isActive ? "rgba(255,107,0,0.12)" : "transparent",
-                  color: isActive ? "#FF6B00" : "#55556a",
-                  fontSize: 12, fontWeight: 700, cursor: "pointer",
-                  fontFamily: "'DM Sans', sans-serif",
-                  textTransform: "capitalize", transition: "all 0.15s",
-                }}
-              >
-                {f === "all" ? `All · ${counts.all}` : `${f} · ${counts[f]}`}
-              </button>
-            );
-          })}
-        </div>
+      {/* Filter chips */}
+      <div className="roh-filter-row">
+        {(["all", "accepted", "rejected", "reassigned"] as const).map(f => {
+          const isActive = filter === f;
+          return (
+            <button
+              key={f}
+              className={`roh-chip${isActive ? " roh-chip-active" : ""}`}
+              onClick={() => setFilter(f)}
+            >
+              {f === "all" ? "All" : f.charAt(0).toUpperCase() + f.slice(1)}
+              <span className="roh-chip-count">{counts[f === "all" ? "all" : f]}</span>
+            </button>
+          );
+        })}
       </div>
 
       {/* List */}
-      {loading ? (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: "0 20px" }}>
-          {[1, 2, 3].map(i => (
-            <div key={i} className="skeleton" style={{ height: 76, borderRadius: 16 }} />
-          ))}
-        </div>
-      ) : filtered.length === 0 ? (
-        <div style={{ textAlign: "center", padding: "60px 20px 80px" }}>
-          <div style={{
-            width: 64, height: 64, borderRadius: 20,
-            background: "rgba(255,255,255,0.04)", border: "1px solid #1a1a28",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            margin: "0 auto 16px", color: "#33334a",
-          }}>
-            <RiTimeLine size={28} />
+      <div className="roh-list">
+        {loading ? (
+          <>
+            <SkeletonRow />
+            <SkeletonRow />
+            <SkeletonRow />
+          </>
+        ) : filtered.length === 0 ? (
+          <div className="roh-empty">
+            <div className="roh-empty-icon"><RiTimeLine size={30} /></div>
+            <div className="roh-empty-title">
+              No {filter === "all" ? "" : filter} orders yet
+            </div>
+            <div className="roh-empty-sub">Your delivery history will appear here</div>
           </div>
-          <div style={{ fontFamily: "'Syne', sans-serif", fontSize: 16, fontWeight: 800, color: "#eeeef8", marginBottom: 6 }}>
-            No {filter === "all" ? "" : filter} orders yet
-          </div>
-          <div style={{ fontSize: 13, color: "#44445a", fontWeight: 500 }}>
-            Your delivery history will appear here
-          </div>
-        </div>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "0 20px 80px" }}>
-          {filtered.map((order, i) => {
+        ) : (
+          filtered.map((order, i) => {
             const cfg = ACTION_CFG[order.action];
             const Icon = cfg.Icon;
             return (
               <div
                 key={order.id}
+                className="roh-order-row"
                 onClick={() => setSelected(order)}
-                className="order-row"
-                style={{
-                  borderRadius: 16, padding: "14px 16px",
-                  background: "#0e0e18", border: "1.5px solid #1a1a28",
-                  display: "flex", alignItems: "center", gap: 14,
-                  cursor: "pointer", transition: "all 0.15s",
-                  animation: "row-in 0.25s ease both",
-                  animationDelay: `${i * 0.04}s`,
-                }}
+                style={{ animationDelay: `${i * 0.045}s` }}
               >
-                {/* Icon */}
-                <div style={{
-                  width: 44, height: 44, borderRadius: 13, flexShrink: 0,
-                  background: cfg.bg, border: `1px solid ${cfg.border}`,
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  color: cfg.color,
-                }}>
-                  <Icon size={20} />
+                <div
+                  className="roh-row-icon"
+                  style={{ background: cfg.bg, border: `1.5px solid ${cfg.border}`, color: cfg.color }}
+                >
+                  <Icon size={21} />
                 </div>
 
-                {/* Info */}
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 3 }}>
-                    <span style={{ fontFamily: "'Syne', sans-serif", fontSize: 13, fontWeight: 800, color: "#eeeef8" }}>
-                      #{order.orderId}
-                    </span>
-                    <span style={{
-                      fontSize: 9, fontWeight: 800, padding: "2px 7px",
-                      borderRadius: 20, background: cfg.bg, color: cfg.color,
-                      textTransform: "uppercase", letterSpacing: ".5px", border: `1px solid ${cfg.border}`,
-                    }}>
+                <div className="roh-row-info">
+                  <div className="roh-row-top">
+                    <span className="roh-row-id">#{order.orderId}</span>
+                    <span
+                      className="roh-row-badge"
+                      style={{ background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}` }}
+                    >
                       {cfg.label}
                     </span>
                   </div>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: "#55556a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {order.vendorName}
-                  </div>
-                  <div style={{ fontSize: 11, color: "#33334a", fontWeight: 500, marginTop: 2 }}>
-                    {fmtTs(order.createdAt)}
-                  </div>
+                  <div className="roh-row-vendor">{order.vendorName}</div>
+                  <div className="roh-row-time">{fmtTs(order.createdAt)}</div>
                 </div>
 
-                {/* Right */}
-                <div style={{ textAlign: "right", flexShrink: 0 }}>
+                <div className="roh-row-right">
                   {order.action === "accepted" && order.total > 0 ? (
-                    <div style={{ fontFamily: "'Syne', sans-serif", fontSize: 14, fontWeight: 900, color: "#10B981" }}>
+                    <div className="roh-row-amount">
                       ₦{order.total.toLocaleString("en-NG")}
                     </div>
                   ) : (
-                    <div style={{ fontSize: 11, color: "#33334a", fontWeight: 600 }}>
-                      —
-                    </div>
+                    <div className="roh-row-amount-empty">—</div>
                   )}
-                  <div style={{
-                    fontSize: 9, fontWeight: 700, color: "#33334a",
-                    textTransform: "uppercase", letterSpacing: ".4px", marginTop: 3,
-                  }}>
-                    Tap for details
-                  </div>
+                  <RiArrowRightSLine size={16} style={{ color: "var(--clr-text-dim)" }} />
                 </div>
               </div>
             );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function DetailRow({
-  icon, label, value, mono = false, highlight = false, statusColor: sc,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  mono?: boolean;
-  highlight?: boolean;
-  statusColor?: string;
-}) {
-  return (
-    <div style={{
-      display: "flex", alignItems: "center", gap: 12,
-      padding: "13px 16px", borderRadius: 14,
-      background: highlight ? "rgba(16,185,129,0.06)" : "rgba(255,255,255,0.03)",
-      border: `1px solid ${highlight ? "rgba(16,185,129,0.15)" : "#1a1a28"}`,
-    }}>
-      <div style={{ flexShrink: 0, width: 20, display: "flex", justifyContent: "center" }}>
-        {icon}
-      </div>
-      <div style={{ fontSize: 12, fontWeight: 600, color: "#44445a", flex: 1 }}>{label}</div>
-      <div style={{
-        fontSize: highlight ? 16 : 13,
-        fontWeight: highlight ? 900 : 700,
-        color: sc ?? (highlight ? "#10B981" : "#eeeef8"),
-        fontFamily: mono ? "'Syne', sans-serif" : "inherit",
-        textTransform: sc ? "capitalize" : "none",
-      }}>
-        {value}
+          })
+        )}
       </div>
     </div>
   );
 }
 
-function statusColor(status: string): string | undefined {
-  if (!status) return undefined;
-  if (status === "delivered") return "#10B981";
-  if (status === "cancelled") return "#ef4444";
-  if (status.includes("rider")) return "#FF6B00";
-  return "#a78bfa";
-}
+// ─── CSS ──────────────────────────────────────────────────────────────────────
 
-const STYLES = `
-  @import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800;900&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap');
-  @keyframes row-in { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
-  @keyframes shimmer { from{background-position:-200% 0} to{background-position:200% 0} }
-  .skeleton {
-    background: linear-gradient(90deg, #0e0e18 25%, #161622 50%, #0e0e18 75%);
-    background-size: 200% 100%;
-    animation: shimmer 1.4s ease-in-out infinite;
+const CSS_VARS = `
+  @import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+
+  /* ── Dark theme ── */
+  .theme-dark {
+    --clr-bg:                #09090f;
+    --clr-surface:           #0f0f1a;
+    --clr-surface-raised:    rgba(255,255,255,0.04);
+    --clr-border:            #1c1c2e;
+    --clr-border-strong:     #252535;
+
+    --clr-text:              #eeeef8;
+    --clr-text-sub:          #8888aa;
+    --clr-text-muted:        #55556e;
+    --clr-text-dim:          #33334a;
+
+    --clr-brand:             #FF6B00;
+    --clr-brand-bg:          rgba(255,107,0,0.10);
+    --clr-brand-border:      rgba(255,107,0,0.25);
+
+    --clr-accepted:          #10B981;
+    --clr-accepted-bg:       rgba(16,185,129,0.09);
+    --clr-accepted-border:   rgba(16,185,129,0.22);
+
+    --clr-rejected:          #f05858;
+    --clr-rejected-bg:       rgba(240,88,88,0.09);
+    --clr-rejected-border:   rgba(240,88,88,0.22);
+
+    --clr-reassigned:        #a78bfa;
+    --clr-reassigned-bg:     rgba(167,139,250,0.09);
+    --clr-reassigned-border: rgba(167,139,250,0.22);
+
+    --clr-skeleton-base:     #13131f;
+    --clr-skeleton-shine:    #1d1d2f;
+
+    --header-border:         #141421;
+    --strip-bg:              linear-gradient(135deg,rgba(255,107,0,0.12),rgba(255,107,0,0.04));
+    --strip-border:          rgba(255,107,0,0.20);
   }
-  .order-row:active { transform: scale(0.98); opacity: 0.85; }
-  .stat-pill:active { transform: scale(0.97); }
+
+  /* ── Light theme ── */
+  .theme-light {
+    --clr-bg:                #f4f4f9;
+    --clr-surface:           #ffffff;
+    --clr-surface-raised:    rgba(0,0,0,0.04);
+    --clr-border:            #e3e3ef;
+    --clr-border-strong:     #d0d0e0;
+
+    --clr-text:              #111118;
+    --clr-text-sub:          #44445a;
+    --clr-text-muted:        #7777a0;
+    --clr-text-dim:          #aaaac0;
+
+    --clr-brand:             #e85e00;
+    --clr-brand-bg:          rgba(232,94,0,0.08);
+    --clr-brand-border:      rgba(232,94,0,0.20);
+
+    --clr-accepted:          #0a9e6e;
+    --clr-accepted-bg:       rgba(10,158,110,0.08);
+    --clr-accepted-border:   rgba(10,158,110,0.20);
+
+    --clr-rejected:          #d93535;
+    --clr-rejected-bg:       rgba(217,53,53,0.08);
+    --clr-rejected-border:   rgba(217,53,53,0.20);
+
+    --clr-reassigned:        #7c5fec;
+    --clr-reassigned-bg:     rgba(124,95,236,0.08);
+    --clr-reassigned-border: rgba(124,95,236,0.20);
+
+    --clr-skeleton-base:     #ebebf5;
+    --clr-skeleton-shine:    #f7f7ff;
+
+    --header-border:         #e3e3ef;
+    --strip-bg:              linear-gradient(135deg,rgba(232,94,0,0.09),rgba(232,94,0,0.03));
+    --strip-border:          rgba(232,94,0,0.18);
+  }
+`;
+
+const BASE_STYLES = `
+  @keyframes row-in  { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
+  @keyframes fade-in { from{opacity:0} to{opacity:1} }
+  @keyframes shimmer { from{background-position:-200% 0} to{background-position:200% 0} }
+  @keyframes hero-in { from{opacity:0;transform:scale(.95) translateY(14px)} to{opacity:1;transform:scale(1) translateY(0)} }
+
+  .roh-root {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    background: var(--clr-bg);
+    min-height: 100%;
+    transition: background 0.3s, color 0.3s;
+  }
+
+  /* ── Page header ── */
+  .roh-page-header {
+    display: flex; align-items: center; gap: 14px;
+    padding: 20px 18px 0; margin-bottom: 18px;
+  }
+  .roh-page-icon {
+    width: 46px; height: 46px; border-radius: 15px;
+    background: var(--clr-brand-bg);
+    border: 1.5px solid var(--clr-brand-border);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--clr-brand); flex-shrink: 0;
+  }
+  .roh-page-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 20px; font-weight: 900;
+    color: var(--clr-text); line-height: 1.1;
+  }
+  .roh-page-sub {
+    font-size: 12px; font-weight: 600;
+    color: var(--clr-text-muted); margin-top: 2px;
+  }
+  .roh-page-count-badge {
+    margin-left: auto;
+    font-family: 'Syne', sans-serif;
+    font-size: 15px; font-weight: 900; color: var(--clr-brand);
+    background: var(--clr-brand-bg); border: 1.5px solid var(--clr-brand-border);
+    width: 40px; height: 40px; border-radius: 12px;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+
+  /* ── Earnings strip ── */
+  .roh-earnings-strip {
+    position: relative; margin: 0 16px 14px;
+    border-radius: 20px; padding: 20px 22px;
+    background: var(--strip-bg); border: 1.5px solid var(--strip-border);
+    display: flex; align-items: center; gap: 20px; overflow: hidden;
+  }
+  .roh-strip-shimmer {
+    position: absolute; bottom: 0; left: 0; right: 0; height: 2px;
+    background: linear-gradient(90deg,transparent,var(--clr-brand),transparent);
+    opacity: 0.45;
+  }
+  .roh-earnings-eyebrow {
+    display: flex; align-items: center; gap: 5px;
+    font-size: 10px; font-weight: 800; letter-spacing: .8px;
+    text-transform: uppercase; color: var(--clr-text-muted); margin-bottom: 4px;
+  }
+  .roh-earnings-amount {
+    font-family: 'Syne', sans-serif;
+    font-size: 30px; font-weight: 900;
+    color: var(--clr-brand); letter-spacing: -1px; line-height: 1;
+  }
+  .roh-earnings-left { flex: 1; }
+  .roh-earnings-right { text-align: right; flex-shrink: 0; }
+  .roh-earnings-divider {
+    width: 1px; height: 44px;
+    background: var(--clr-border-strong); flex-shrink: 0;
+  }
+  .roh-earnings-count {
+    font-family: 'Syne', sans-serif;
+    font-size: 22px; font-weight: 900;
+    color: var(--clr-accepted); line-height: 1;
+  }
+  .roh-earnings-total-num {
+    font-family: 'Syne', sans-serif;
+    font-size: 18px; font-weight: 900;
+    color: var(--clr-text); line-height: 1;
+  }
+
+  /* ── Stat grid ── */
+  .roh-stat-grid {
+    display: grid; grid-template-columns: 1fr 1fr 1fr;
+    gap: 8px; padding: 0 16px; margin-bottom: 14px;
+  }
+  .roh-stat-card {
+    position: relative; border-radius: 16px; padding: 14px 10px 13px;
+    text-align: center; background: var(--clr-surface);
+    border: 1.5px solid var(--clr-border); cursor: pointer;
+    transition: all 0.18s; font-family: inherit; overflow: hidden;
+  }
+  .roh-stat-card:active { transform: scale(0.95); }
+  .roh-stat-icon { display: flex; justify-content: center; margin-bottom: 7px; }
+  .roh-stat-num {
+    font-family: 'Syne', sans-serif;
+    font-size: 22px; font-weight: 900; line-height: 1; margin-bottom: 4px;
+  }
+  .roh-stat-label {
+    font-size: 9px; font-weight: 800;
+    text-transform: uppercase; letter-spacing: .5px; opacity: 0.75;
+  }
+  .roh-stat-active-dot {
+    position: absolute; bottom: 0; left: 50%; transform: translateX(-50%);
+    width: 28px; height: 3px; border-radius: 2px 2px 0 0;
+  }
+
+  /* ── Filter chips ── */
+  .roh-filter-row {
+    display: flex; gap: 8px; padding: 0 16px; margin-bottom: 14px;
+    overflow-x: auto; -webkit-overflow-scrolling: touch;
+  }
+  .roh-filter-row::-webkit-scrollbar { display: none; }
+  .roh-chip {
+    flex-shrink: 0; display: flex; align-items: center; gap: 6px;
+    padding: 7px 14px; border-radius: 20px;
+    border: 1.5px solid var(--clr-border); background: transparent;
+    color: var(--clr-text-muted);
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 12px; font-weight: 700; cursor: pointer;
+    transition: all 0.15s; white-space: nowrap;
+  }
+  .roh-chip-active {
+    border-color: var(--clr-brand-border);
+    background: var(--clr-brand-bg); color: var(--clr-brand);
+  }
+  .roh-chip-count {
+    background: var(--clr-surface-raised);
+    border-radius: 8px; padding: 1px 6px;
+    font-size: 10px; font-weight: 800;
+  }
+
+  /* ── Order list ── */
+  .roh-list {
+    display: flex; flex-direction: column; gap: 8px;
+    padding: 0 16px 90px;
+  }
+
+  /* ── Order row ── */
+  .roh-order-row {
+    border-radius: 18px; padding: 14px;
+    background: var(--clr-surface); border: 1.5px solid var(--clr-border);
+    display: flex; align-items: center; gap: 13px;
+    cursor: pointer; transition: all 0.15s;
+    animation: row-in 0.28s ease both;
+  }
+  .roh-order-row:active { transform: scale(0.985); opacity: 0.85; }
+  .roh-row-icon {
+    width: 46px; height: 46px; border-radius: 14px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .roh-row-info { flex: 1; min-width: 0; }
+  .roh-row-top { display: flex; align-items: center; gap: 7px; margin-bottom: 3px; }
+  .roh-row-id {
+    font-family: 'Syne', sans-serif;
+    font-size: 13px; font-weight: 800; color: var(--clr-text);
+  }
+  .roh-row-badge {
+    font-size: 9px; font-weight: 800;
+    padding: 2px 8px; border-radius: 20px;
+    text-transform: uppercase; letter-spacing: .5px;
+  }
+  .roh-row-vendor {
+    font-size: 12px; font-weight: 600; color: var(--clr-text-sub);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .roh-row-time {
+    font-size: 11px; font-weight: 500; color: var(--clr-text-dim); margin-top: 2px;
+  }
+  .roh-row-right {
+    display: flex; flex-direction: column; align-items: flex-end;
+    flex-shrink: 0; gap: 4px;
+  }
+  .roh-row-amount {
+    font-family: 'Syne', sans-serif;
+    font-size: 14px; font-weight: 900;
+    color: var(--clr-accepted); white-space: nowrap;
+  }
+  .roh-row-amount-empty { font-size: 13px; font-weight: 700; color: var(--clr-text-dim); }
+
+  /* ── Skeleton ── */
+  .roh-skeleton {
+    background: linear-gradient(90deg,
+      var(--clr-skeleton-base) 25%,
+      var(--clr-skeleton-shine) 50%,
+      var(--clr-skeleton-base) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s ease-in-out infinite;
+  }
+
+  /* ── Empty ── */
+  .roh-empty { text-align: center; padding: 64px 20px 80px; animation: fade-in 0.4s ease; }
+  .roh-empty-icon {
+    width: 68px; height: 68px; border-radius: 22px;
+    background: var(--clr-surface); border: 1.5px solid var(--clr-border);
+    display: flex; align-items: center; justify-content: center;
+    margin: 0 auto 16px; color: var(--clr-text-dim);
+  }
+  .roh-empty-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 17px; font-weight: 800;
+    color: var(--clr-text); margin-bottom: 6px;
+  }
+  .roh-empty-sub { font-size: 13px; font-weight: 500; color: var(--clr-text-muted); }
+
+  /* ── Detail view ── */
+  .roh-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 18px; border-bottom: 1px solid var(--header-border);
+  }
+  .roh-back-btn {
+    width: 40px; height: 40px; border-radius: 13px;
+    background: var(--clr-surface-raised); border: 1px solid var(--clr-border);
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; color: var(--clr-text-sub); transition: all 0.15s;
+  }
+  .roh-back-btn:active { transform: scale(0.92); }
+  .roh-header-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 16px; font-weight: 900; color: var(--clr-text);
+  }
+  .roh-detail-body { padding: 20px 18px 90px; }
+  .roh-detail-hero {
+    border-radius: 22px; padding: 32px 20px 26px; text-align: center;
+    position: relative; overflow: hidden; margin-bottom: 22px;
+    animation: hero-in 0.32s cubic-bezier(.34,1.56,.64,1) both;
+  }
+  .roh-hero-circle {
+    position: absolute; border-radius: 50%; opacity: 0.07;
+  }
+  .roh-hero-circle-1 { width: 120px; height: 120px; top: -30px; right: -30px; }
+  .roh-hero-circle-2 { width: 70px; height: 70px; bottom: -20px; left: 20px; }
+  .roh-hero-icon {
+    width: 66px; height: 66px; border-radius: 20px;
+    display: flex; align-items: center; justify-content: center;
+    margin: 0 auto 16px;
+  }
+  .roh-hero-label {
+    font-family: 'Syne', sans-serif;
+    font-size: 24px; font-weight: 900; margin-bottom: 6px;
+  }
+  .roh-hero-id { font-size: 13px; font-weight: 700; color: var(--clr-text-muted); }
+  .roh-detail-section-label {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 10px; font-weight: 800; letter-spacing: .8px;
+    text-transform: uppercase; color: var(--clr-text-dim); margin-bottom: 10px;
+  }
+  .roh-detail-rows { display: flex; flex-direction: column; gap: 8px; margin-bottom: 18px; }
+  .roh-context-card {
+    padding: 16px 18px; border-radius: 16px;
+    background: var(--clr-surface-raised); border: 1px solid var(--clr-border);
+  }
+  .roh-context-label {
+    font-size: 10px; font-weight: 800; letter-spacing: .8px;
+    text-transform: uppercase; color: var(--clr-text-dim); margin-bottom: 8px;
+  }
+  .roh-context-body {
+    font-size: 13px; font-weight: 500;
+    color: var(--clr-text-sub); line-height: 1.65;
+  }
 `;
