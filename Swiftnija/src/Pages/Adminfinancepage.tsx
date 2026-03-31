@@ -101,7 +101,8 @@ function BankLinkForm({ onLink, loading: savingBank, error, onClearError }: {
       )}
       <div style={{ marginBottom: 14, position: "relative" }}>
         <div style={{ fontSize: 10, fontWeight: 800, color: "rgba(232,232,240,0.5)", textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: 6 }}>Select Bank</div>
-        <div onClick={() => { setShowBankList(v => !v); onClearError(); }}
+        <div onClick={() => { setShowBankList(v => !v); onClearError(); }} 
+
           style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", background: "rgba(255,255,255,0.05)", border: "1.5px solid rgba(255,255,255,0.1)", borderRadius: 12, cursor: "pointer", userSelect: "none", color: selectedBank ? "#e8e8f0" : "rgba(232,232,240,0.4)", fontSize: 13 }}>
           <span>{selectedBank ? selectedBank.name : loadingBanks ? "Loading banks…" : "Choose bank"}</span>
           {showBankList ? <FiChevronUp size={14} /> : <FiChevronDown size={14} />}

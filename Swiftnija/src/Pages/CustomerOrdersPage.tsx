@@ -1,73 +1,110 @@
-// pages/CartPage.tsx
+// pages/OrdersPage.tsx
+// ── Fixes applied:
+// 1. VendorCartPage: vendor logo shown in sticky "Continue to Pay" bar
+// 2. "Continue to Pay" bar is sticky at bottom — always visible while scrolling
+// 3. Order summary section added: promo, discount, delivery fee (with calculation from CartPage)
+// 4. "Track your orders" shows only 1 card by default; "View all" expands the rest
+
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { useState, useEffect, useCallback, useRef } from "react";
+import {
+  FiShoppingBag, FiShoppingCart, FiMapPin, FiChevronRight,
+  FiPackage, FiClock, FiTruck, FiPlus, FiCheck,
+  FiCreditCard, FiArrowRight, FiHome, FiBriefcase,
+  FiBook, FiArrowLeft, FiStar, FiZap, FiShield,
+  FiNavigation, FiX, FiExternalLink,
+  FiMinus, FiAlertCircle, FiLock, FiEye, FiEyeOff,
+  FiTag, FiChevronDown, FiChevronUp,
+} from "react-icons/fi";
+import { MdOutlineStorefront, MdDeliveryDining } from "react-icons/md";
+import { RiVerifiedBadgeFill, RiBankCardLine } from "react-icons/ri";
+import { auth, db } from "../firebase";
+import {
+  collection, query, where, orderBy, limit, getDocs,
+  doc, getDoc, onSnapshot, setDoc, serverTimestamp,
+} from "firebase/firestore";
 import { useTheme } from "../context/ThemeContext";
 import { useCart } from "../context/Cartcontext";
-import { auth, db } from "../firebase";
-import { getFunctions, httpsCallable } from "firebase/functions";
 import { PAYSTACK_PUBLIC_KEY } from "../services/paystack";
-import {
-  FiShoppingCart, FiTrash2, FiPlus, FiMinus,
-  FiArrowRight, FiTag, FiPackage, FiMapPin,
-  FiCheckCircle, FiShield, FiZap, FiHome,
-  FiBriefcase, FiChevronDown, FiX, FiNavigation,
-} from "react-icons/fi";
-import { RiVerifiedBadgeFill, RiWalletLine } from "react-icons/ri";
-import {
-  doc, getDoc, setDoc, serverTimestamp,
-  collection, query, where, getDocs, limit,
-  onSnapshot, orderBy, limit as fbLimit,
-} from "firebase/firestore";
+import { getFunctions, httpsCallable } from "firebase/functions";
 
-declare global {
-  interface Window {
-    PaystackPop: {
-      setup(opts: {
-        key: string; email: string; amount: number; currency?: string;
-        ref?: string; metadata?: Record<string, unknown>; subaccount?: string;
-        onSuccess: (t: { reference: string }) => void; onCancel: () => void;
-      }): { openIframe(): void };
-    };
-  }
-}
+// ── Types ────────────────────────────────────────────────────────────────────
+type ActiveOrder = {
+  id: string;
+  status: string;
+  vendorName: string;
+  total: number;
+  items: { name: string; qty: number }[];
+  createdAt: any;
+};
+
+type CartVendorGroup = {
+  vendorId: string;
+  vendorName: string;
+  vendorVerified?: boolean;
+  vendorLogo?: string;
+  firstItem: string;
+  itemCount: number;
+  items: any[];
+};
 
 type SavedAddress = {
   id: string;
-  label: "Home" | "Work" | "Other";
+  label: "Home" | "Work" | "School" | "Church" | "Other";
   address: string;
   landmark?: string;
-  extraClue?: string;
-  phone?: string;
   isDefault: boolean;
   lat?: number;
   lng?: number;
 };
 
 type ShippingMeta = {
-  weightKg:     number | null;
+  weightKg: number | null;
   sizeCategory: "small" | "medium" | "large" | "extra_large" | null;
-  lengthCm:     number | null;
-  widthCm:      number | null;
-  heightCm:     number | null;
+  lengthCm: number | null;
+  widthCm: number | null;
+  heightCm: number | null;
 } | null;
 
-const fbFunctions = getFunctions();
+// ── Constants ────────────────────────────────────────────────────────────────
+const ACCENT = "#FF6B00";
+const ACCENT2 = "#FF9A00";
 
-const ACCENT                 = "#FF6B00";
+// Delivery fee constants (mirrored from CartPage)
 const BASE_FEE               = 800;
 const PER_KM                 = 200;
 const MIN_FEE                = 500;
 const MAX_FEE                = 50_000;
 const MULTI_VENDOR_SURCHARGE = 500;
 const LANDMARK_SURCHARGE     = 600;
-
 const SIZE_MULTIPLIERS: Record<string, number> = {
   small: 1.0, medium: 1.3, large: 1.7, extra_large: 2.5,
 };
 
-const parsePrice = (p: string): number =>
-  parseFloat(p.replace(/[₦,\s]/g, "")) || 0;
+const STATUS_META: Record<string, { label: string; color: string; icon: any; bg: string }> = {
+  pending:        { label: "Order Placed",   color: "#f59e0b", bg: "rgba(245,158,11,.12)",  icon: FiClock },
+  confirmed:      { label: "Confirmed",      color: "#3b82f6", bg: "rgba(59,130,246,.12)",  icon: FiCheck },
+  finding_rider:  { label: "Finding Rider",  color: "#8b5cf6", bg: "rgba(139,92,246,.12)",  icon: FiNavigation },
+  rider_assigned: { label: "Rider Assigned", color: "#FF6B00", bg: "rgba(255,107,0,.12)",   icon: MdDeliveryDining },
+  picked_up:      { label: "Picked Up",      color: "#FF6B00", bg: "rgba(255,107,0,.12)",   icon: FiPackage },
+  arriving:       { label: "Almost Here!",   color: "#10B981", bg: "rgba(16,185,129,.12)",  icon: FiTruck },
+  delivered:      { label: "Delivered",      color: "#10B981", bg: "rgba(16,185,129,.12)",  icon: FiCheck },
+};
 
+const LABEL_ICONS: Record<string, any> = {
+  Home: FiHome, Work: FiBriefcase, School: FiBook, Church: FiBook, Other: FiMapPin,
+};
+const LABEL_COLORS: Record<string, string> = {
+  Home: "#3b82f6", Work: "#8b5cf6", School: "#10B981", Church: "#f59e0b", Other: ACCENT,
+};
+
+const parsePrice = (p: string) => parseFloat(String(p).replace(/[₦,\s]/g, "")) || 0;
+const fbFunctions = getFunctions();
+
+// ── Coord cache (shared across helpers) ──────────────────────────────────────
+const coordCache = new Map<string, any>();
+
+// ── Delivery helpers (ported from CartPage) ───────────────────────────────────
 function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371, toR = (d: number) => (d * Math.PI) / 180;
   const dLat = toR(lat2 - lat1), dLng = toR(lng2 - lng1);
@@ -76,17 +113,13 @@ function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): nu
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-function legFee(
-  vLat: number, vLng: number,
-  uLat: number, uLng: number,
-  shipping?: ShippingMeta,
-): number {
-  const km          = haversineKm(vLat, vLng, uLat, uLng);
+function legFee(vLat: number, vLng: number, uLat: number, uLng: number, shipping?: ShippingMeta): number {
+  const km = haversineKm(vLat, vLng, uLat, uLng);
   const distanceFee = Math.min(Math.max(Math.round(BASE_FEE + km * PER_KM), MIN_FEE), MAX_FEE);
-  const weightKg        = shipping?.weightKg ?? 0;
+  const weightKg = shipping?.weightKg ?? 0;
   const weightSurcharge = weightKg > 2 ? (weightKg - 2) * 50 : 0;
-  const sizeMultiplier  = shipping?.sizeCategory ? (SIZE_MULTIPLIERS[shipping.sizeCategory] ?? 1.0) : 1.0;
-  let volumetricFactor  = 1.0;
+  const sizeMultiplier = shipping?.sizeCategory ? (SIZE_MULTIPLIERS[shipping.sizeCategory] ?? 1.0) : 1.0;
+  let volumetricFactor = 1.0;
   if (shipping?.lengthCm && shipping?.widthCm && shipping?.heightCm) {
     const vKg = (shipping.lengthCm * shipping.widthCm * shipping.heightCm) / 5000;
     if (vKg > 5) volumetricFactor = 1.0 + (vKg - 5) * 0.04;
@@ -102,12 +135,9 @@ function legFee(
 function getUserCoords(): Promise<GeolocationCoordinates> {
   return new Promise((res, rej) => {
     if (!navigator.geolocation) return rej(new Error("No geolocation"));
-    navigator.geolocation.getCurrentPosition(p => res(p.coords), rej,
-      { timeout: 10_000, maximumAge: 0 });
+    navigator.geolocation.getCurrentPosition(p => res(p.coords), rej, { timeout: 10_000, maximumAge: 0 });
   });
 }
-
-const coordCache = new Map<string, { lat: number; lng: number; approximate?: boolean } | null>();
 
 async function geocodeAddress(address: string): Promise<{ lat: number; lng: number; approximate: boolean } | null> {
   const key = address.toLowerCase().trim();
@@ -123,7 +153,7 @@ async function geocodeAddress(address: string): Promise<{ lat: number; lng: numb
       coordCache.set(key, result);
       return result;
     }
-  } catch (e) { console.warn("[CartPage] mapsForwardGeocode failed:", e); }
+  } catch { /* fallback */ }
   try {
     const res = await fetch(
       `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&limit=1&countrycodes=ng`,
@@ -135,1007 +165,1480 @@ async function geocodeAddress(address: string): Promise<{ lat: number; lng: numb
       coordCache.set(key, result);
       return result;
     }
-  } catch (e) { console.warn("[CartPage] Nominatim fallback failed:", e); }
-  const cityPart = address.split(",").slice(-3).join(",").trim();
-  if (cityPart && cityPart !== address) {
-    try {
-      const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(cityPart + " Nigeria")}&format=json&limit=1&countrycodes=ng`,
-        { headers: { "Accept-Language": "en" } }
-      );
-      const data = await res.json() as Array<{ lat: string; lon: string }>;
-      if (data[0]) {
-        const result = { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon), approximate: true };
-        coordCache.set(key, result);
-        return result;
-      }
-    } catch { /* give up */ }
-  }
+  } catch { /* give up */ }
   coordCache.set(key, null);
   return null;
 }
 
-async function fetchShippingMeta(productName: string): Promise<ShippingMeta> {
-  const cacheKey = `shipping:${productName}`;
-  if ((coordCache as unknown as Map<string, unknown>).has(cacheKey)) {
-    return (coordCache as unknown as Map<string, ShippingMeta>).get(cacheKey) ?? null;
-  }
-  try {
-    for (const field of ["name", "productName", "title"]) {
-      const snap = await getDocs(query(collection(db, "products"), where(field, "==", productName), limit(1)));
-      if (!snap.empty) {
-        const data = snap.docs[0].data();
-        const meta = data.shipping ?? null;
-        (coordCache as unknown as Map<string, ShippingMeta>).set(cacheKey, meta);
-        return meta;
-      }
-    }
-  } catch { /* ignore */ }
-  (coordCache as unknown as Map<string, ShippingMeta>).set(cacheKey, null);
-  return null;
+// ── Theme builder ─────────────────────────────────────────────────────────────
+function useColors(dark: boolean) {
+  return {
+    bg:   dark ? "#09090e" : "#f0f0f8",
+    surf: dark ? "#111118" : "#ffffff",
+    brd:  dark ? "#1c1c2a" : "#e4e4f0",
+    txt:  dark ? "#eeeef8" : "#0f0f1a",
+    sub:  dark ? "#606080" : "#7070a0",
+    dim:  dark ? "#2a2a3e" : "#d0d0e8",
+    inp:  dark ? "#15151f" : "#f5f5ff",
+    inpB: dark ? "#22223a" : "#d8d8f0",
+    card: dark ? "#13131e" : "#ffffff",
+    glow: dark ? "rgba(255,107,0,.18)" : "rgba(255,107,0,.10)",
+  };
 }
 
-// ── Pending order hook ────────────────────────────────────────────────────────
-function usePendingOrder() {
-  const [pendingOrderId,     setPendingOrderId]     = useState<string | null>(null);
-  const [pendingOrderStatus, setPendingOrderStatus] = useState<string>("pending");
-  const unsubOrderRef = useRef<(() => void) | null>(null);
+// ══════════════════════════════════════════════════════════════════════════════
+// MAIN OrdersPage
+// ══════════════════════════════════════════════════════════════════════════════
+export default function OrdersPage() {
+  const { theme } = useTheme();
+  const dark = theme === "dark";
+  const navigate = useNavigate();
+  const { cart } = useCart();
+  const c = useColors(dark);
 
+  const [activeOrders, setActiveOrders] = useState<ActiveOrder[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(true);
+  // FIX: Show only 1 order by default, expand with "View all"
+  const [showAllOrders, setShowAllOrders] = useState(false);
+  const [resolvedNames, setResolvedNames] = useState<Record<string, string>>({});
+  const [vendorLogos, setVendorLogos] = useState<Record<string, string>>({});
+
+  // Resolve vendor names + logos
+  useEffect(() => {
+    const idsToResolve = cart
+      .filter(it => it.vendorId && (!it.vendorName || it.vendorName === "Unknown Store"))
+      .map(it => it.vendorId as string)
+      .filter((id, i, arr) => arr.indexOf(id) === i);
+
+    const allIds = cart
+      .filter(it => it.vendorId)
+      .map(it => it.vendorId as string)
+      .filter((id, i, arr) => arr.indexOf(id) === i);
+
+    if (allIds.length === 0) return;
+
+    Promise.all(
+      allIds.map(async id => {
+        try {
+          const snap = await getDoc(doc(db, "vendors", id));
+          if (!snap.exists()) return [id, null, null] as const;
+          const d = snap.data();
+          const name = d.businessName || d.storeName || d.displayName || d.name || null;
+          const logo = d.logo || d.logoUrl || d.image || d.avatar || null;
+          return [id, name, logo] as const;
+        } catch {
+          return [id, null, null] as const;
+        }
+      })
+    ).then(results => {
+      const nameMap: Record<string, string> = {};
+      const logoMap: Record<string, string> = {};
+      for (const [id, name, logo] of results) {
+        if (id && name) nameMap[id] = name;
+        if (id && logo) logoMap[id] = logo;
+      }
+      setResolvedNames(prev => ({ ...prev, ...nameMap }));
+      setVendorLogos(prev => ({ ...prev, ...logoMap }));
+    });
+  }, [cart]);
+
+  // Group cart by vendor
+  const vendorGroups: CartVendorGroup[] = (() => {
+    const map = new Map<string, CartVendorGroup>();
+    for (const item of cart) {
+      const key = item.vendorId || item.vendorName || "_unknown";
+      const displayName =
+        (item.vendorName && item.vendorName !== "Unknown Store" ? item.vendorName : null) ||
+        (item.vendorId ? resolvedNames[item.vendorId] : null) ||
+        "Unknown Store";
+      const logo = item.vendorId ? vendorLogos[item.vendorId] : undefined;
+
+      if (!map.has(key)) {
+        map.set(key, {
+          vendorId: item.vendorId || "",
+          vendorName: displayName,
+          vendorVerified: item.vendorVerified,
+          vendorLogo: logo,
+          firstItem: item.name,
+          itemCount: 0,
+          items: [],
+        });
+      } else {
+        const g = map.get(key)!;
+        if (g.vendorName === "Unknown Store" && displayName !== "Unknown Store") g.vendorName = displayName;
+        if (!g.vendorLogo && logo) g.vendorLogo = logo;
+      }
+      const g = map.get(key)!;
+      g.itemCount += item.qty;
+      g.items.push(item);
+    }
+    return [...map.values()];
+  })();
+
+  // Live active orders
   useEffect(() => {
     const uid = auth.currentUser?.uid;
-    if (!uid) return;
+    if (!uid) { setOrdersLoading(false); return; }
     const q = query(
       collection(db, "orders"),
       where("userId", "==", uid),
       orderBy("createdAt", "desc"),
-      fbLimit(5),
+      limit(10),
     );
-    const unsubList = onSnapshot(q, (snap) => {
-      const activeDoc = snap.docs.find(d => {
-        const s = d.data().status ?? "pending";
-        return s !== "delivered" && s !== "cancelled";
-      });
-      if (!activeDoc) {
-        setPendingOrderId(null);
-        unsubOrderRef.current?.();
-        unsubOrderRef.current = null;
-        return;
-      }
-      const orderId = activeDoc.id;
-      setPendingOrderId(orderId);
-      setPendingOrderStatus(activeDoc.data().status ?? "pending");
-      if (unsubOrderRef.current) unsubOrderRef.current();
-      unsubOrderRef.current = onSnapshot(doc(db, "orders", orderId), orderSnap => {
-        if (!orderSnap.exists()) { setPendingOrderId(null); return; }
-        const status = orderSnap.data().status ?? "pending";
-        setPendingOrderStatus(status);
-        if (status === "delivered" || status === "cancelled") setPendingOrderId(null);
-      });
+    const unsub = onSnapshot(q, snap => {
+      const active = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }) as ActiveOrder)
+        .filter(o => !["delivered", "cancelled"].includes(o.status));
+      setActiveOrders(active);
+      setOrdersLoading(false);
     });
-    return () => { unsubList(); unsubOrderRef.current?.(); };
-  }, [auth.currentUser?.uid]);
+    return () => unsub();
+  }, []);
 
-  return { pendingOrderId, pendingOrderStatus };
-}
+  // FIX: Show only 1 order by default, rest hidden behind "View all"
+  const visibleOrders = showAllOrders ? activeOrders : activeOrders.slice(0, 1);
 
-// ── Pending order banner ──────────────────────────────────────────────────────
-const STATUS_LABELS: Record<string, string> = {
-  pending: "Order Placed", confirmed: "Order Confirmed",
-  finding_rider: "Finding Rider", rider_assigned: "Rider Assigned",
-  picked_up: "Order Picked Up", arriving: "Rider Arriving", delivered: "Delivered!",
-};
-const STATUS_ICONS: Record<string, string> = {
-  pending: "🕐", confirmed: "✅", finding_rider: "🔍",
-  rider_assigned: "🏍️", picked_up: "📦", arriving: "🚀", delivered: "🎉",
-};
-
-function PendingOrderBanner({ orderId, status, onTrack }: {
-  orderId: string; status: string; onTrack: () => void;
-}) {
-  const isArriving = status === "arriving";
-  const isFinding  = status === "finding_rider" || status === "pending" || status === "confirmed";
   return (
     <>
-      <style>{`
-        @keyframes pob-pulse { 0%,100%{box-shadow:0 0 0 0 rgba(255,107,0,0)} 50%{box-shadow:0 0 0 12px rgba(255,107,0,0.12)} }
-        @keyframes pob-arrive-pulse { 0%,100%{box-shadow:0 0 0 0 rgba(16,185,129,0)} 50%{box-shadow:0 0 0 12px rgba(16,185,129,0.15)} }
-        @keyframes pob-dot { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-5px)} }
-        @keyframes pob-in { from{opacity:0;transform:translateY(24px) scale(0.96)} to{opacity:1;transform:translateY(0) scale(1)} }
-        .pob-wrap { position:fixed; bottom:96px; left:12px; right:12px; z-index:500; animation:pob-in .45s cubic-bezier(.34,1.56,.64,1) both; pointer-events:none; max-width:500px; margin:0 auto; }
-        .pob-card { display:flex; align-items:center; gap:12px; background:#13131a; border:2px solid; border-radius:22px; padding:13px 15px; pointer-events:all; cursor:pointer; transition:transform .2s,box-shadow .2s; }
-        .pob-card:hover{transform:translateY(-2px)} .pob-card:active{transform:scale(.98)}
-        .pob-card.orange{border-color:rgba(255,107,0,0.55);animation:pob-pulse 2.4s ease-in-out infinite}
-        .pob-card.green{border-color:rgba(16,185,129,0.55);animation:pob-arrive-pulse 2s ease-in-out infinite}
-        .pob-icon{width:46px;height:46px;border-radius:14px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:22px}
-        .pob-icon.orange{background:rgba(255,107,0,0.12);border:1.5px solid rgba(255,107,0,0.25)}
-        .pob-icon.green{background:rgba(16,185,129,0.12);border:1.5px solid rgba(16,185,129,0.25)}
-        .pob-body{flex:1;min-width:0}
-        .pob-label{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.8px;color:#55556a;font-family:'DM Sans',sans-serif}
-        .pob-status{font-family:'Syne',sans-serif;font-size:14px;font-weight:800;margin-top:1px;display:flex;align-items:center;gap:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-        .pob-status.orange{color:#FF6B00} .pob-status.green{color:#10B981}
-        .pob-ref{font-size:10px;font-weight:700;color:#333350;margin-top:1px}
-        .pob-dot{width:5px;height:5px;border-radius:50%;background:currentColor;display:inline-block}
-        .pob-dot:nth-child(1){animation:pob-dot .9s ease-in-out 0s infinite}
-        .pob-dot:nth-child(2){animation:pob-dot .9s ease-in-out .18s infinite}
-        .pob-dot:nth-child(3){animation:pob-dot .9s ease-in-out .36s infinite}
-        .pob-cta{flex-shrink:0;display:flex;align-items:center;gap:6px;color:white;border:none;border-radius:14px;padding:10px 16px;cursor:pointer;font-family:'Syne',sans-serif;font-size:13px;font-weight:800;transition:transform .15s,box-shadow .15s;white-space:nowrap}
-        .pob-cta:hover{transform:scale(1.04)} .pob-cta:active{transform:scale(.97)}
-        .pob-cta.orange{background:linear-gradient(135deg,#FF6B00,#FF9A00);box-shadow:0 4px 16px rgba(255,107,0,0.45)}
-        .pob-cta.green{background:linear-gradient(135deg,#10B981,#059669);box-shadow:0 4px 16px rgba(16,185,129,0.45)}
-      `}</style>
-      <div className="pob-wrap">
-        <div className={`pob-card ${isArriving ? "green" : "orange"}`} onClick={onTrack}>
-          <div className={`pob-icon ${isArriving ? "green" : "orange"}`}>{STATUS_ICONS[status] ?? "🏍️"}</div>
-          <div className="pob-body">
-            <div className="pob-label">Active Order</div>
-            <div className={`pob-status ${isArriving ? "green" : "orange"}`}>
-              {STATUS_LABELS[status] ?? "In Progress"}
-              {isFinding && (
-                <span style={{ display: "inline-flex", gap: 3, marginLeft: 4 }}>
-                  <span className="pob-dot" /><span className="pob-dot" /><span className="pob-dot" />
-                </span>
+      <style>{globalStyles(dark, c)}</style>
+      <div className="op-root" style={{ background: c.bg, color: c.txt }}>
+
+        {/* ── Hero ── */}
+        <div className="op-hero" style={{ background: dark ? "#0f0f1a" : "#fff" }}>
+          <div className="op-hero-radial" />
+          <div className="op-hero-inner">
+            <div className="op-hero-eyebrow" style={{ color: ACCENT }}>
+              <FiShoppingBag size={13} />
+              <span>SwiftNija</span>
+            </div>
+            <h1 className="op-hero-title" style={{ color: c.txt }}>
+              Your <span style={{ color: ACCENT }}>Orders</span>
+            </h1>
+            <p className="op-hero-sub" style={{ color: c.sub }}>
+              Track deliveries &amp; continue shopping
+            </p>
+          </div>
+          <div className="op-hero-wave" style={{ background: c.bg }} />
+        </div>
+
+        <div className="op-body">
+
+          {/* ── Active Orders section ── */}
+          <section className="op-section">
+            <div className="op-sec-head">
+              <div className="op-sec-pill" style={{
+                background: dark ? "rgba(255,107,0,.08)" : "rgba(255,107,0,.07)",
+                border: "1px solid rgba(255,107,0,.22)",
+              }}>
+                <FiTruck size={12} color={ACCENT} />
+                <span style={{ color: ACCENT }}>Track your orders</span>
+              </div>
+              {/* FIX: Show count + View all button only when there are multiple orders */}
+              {activeOrders.length > 1 && (
+                <button
+                  onClick={() => setShowAllOrders(v => !v)}
+                  style={{
+                    marginLeft: "auto", background: "none", border: "none", cursor: "pointer",
+                    display: "flex", alignItems: "center", gap: 5,
+                    color: ACCENT, fontSize: 12, fontWeight: 800,
+                  }}
+                >
+                  {showAllOrders ? (
+                    <><FiChevronUp size={14} /> Show less</>
+                  ) : (
+                    <><FiChevronDown size={14} /> View all ({activeOrders.length})</>
+                  )}
+                </button>
               )}
             </div>
-            <div className="pob-ref">#{orderId.slice(-8).toUpperCase()}</div>
+
+            {ordersLoading ? (
+              <div className="op-skeleton-card" style={{ background: c.surf, border: `1.5px solid ${c.brd}` }}>
+                <div className="op-sk" style={{ width: "60%", height: 14 }} />
+                <div className="op-sk" style={{ width: "40%", height: 11, marginTop: 10 }} />
+              </div>
+            ) : activeOrders.length === 0 ? (
+              <div className="op-empty-card" style={{ background: c.surf, border: `1.5px dashed ${c.brd}` }}>
+                <div className="op-empty-orb" style={{ background: dark ? "rgba(255,107,0,.05)" : "rgba(255,107,0,.04)" }}>
+                  <FiShoppingBag size={30} color={dark ? "#2e2e4a" : "#d8d8ee"} strokeWidth={1.4} />
+                </div>
+                <p className="op-empty-title" style={{ color: c.txt }}>No active orders</p>
+                <p className="op-empty-sub" style={{ color: c.sub }}>Your ongoing deliveries will appear here</p>
+              </div>
+            ) : (
+              <div className="op-order-list">
+                {visibleOrders.map((order, i) => {
+                  const meta = STATUS_META[order.status] || STATUS_META.pending;
+                  const Icon = meta.icon;
+                  return (
+                    <div
+                      key={order.id}
+                      className="op-order-card"
+                      style={{ background: c.card, border: `1.5px solid ${c.brd}`, animationDelay: `${i * 0.07}s` }}
+                      onClick={() => navigate(`/orders/${order.id}/track`)}
+                    >
+                      <div className="op-order-stripe" style={{ background: `linear-gradient(180deg,${meta.color},${meta.color}88)` }} />
+                      <div className="op-order-body">
+                        <div className="op-order-top">
+                          <div className="op-order-pill" style={{ background: meta.bg, color: meta.color }}>
+                            <Icon size={11} />
+                            <span>{meta.label}</span>
+                          </div>
+                          <span className="op-order-ref" style={{ color: c.sub }}>
+                            #{order.id.slice(-7).toUpperCase()}
+                          </span>
+                        </div>
+                        <div className="op-order-vendor" style={{ color: c.txt }}>{order.vendorName || "Store"}</div>
+                        <div className="op-order-items" style={{ color: c.sub }}>
+                          {order.items?.slice(0, 2).map((it, j) => (
+                            <span key={j}>{it.qty}× {it.name}{j < Math.min(order.items.length, 2) - 1 ? "," : ""} </span>
+                          ))}
+                          {order.items?.length > 2 && <span>+{order.items.length - 2} more</span>}
+                        </div>
+                        <div className="op-order-foot">
+                          <span style={{ fontFamily: "'Syne',sans-serif", fontSize: 17, fontWeight: 900, color: ACCENT }}>
+                            ₦{order.total?.toLocaleString()}
+                          </span>
+                          <div className="op-track-pill" style={{ background: `${meta.color}18`, color: meta.color }}>
+                            Track <FiChevronRight size={12} />
+                          </div>
+                        </div>
+                      </div>
+                      {order.status === "finding_rider" && (
+                        <div className="op-pulse-row">
+                          <span /><span /><span />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+
+          {/* ── Continue your order (cart groups) ── */}
+          <section className="op-section">
+            <div className="op-sec-head">
+              <div className="op-sec-pill" style={{
+                background: dark ? "rgba(59,130,246,.07)" : "rgba(59,130,246,.05)",
+                border: "1px solid rgba(59,130,246,.2)",
+              }}>
+                <FiShoppingCart size={12} color="#3b82f6" />
+                <span style={{ color: "#3b82f6" }}>Continue your order</span>
+              </div>
+            </div>
+
+            {vendorGroups.length === 0 ? (
+              <div className="op-empty-card" style={{ background: c.surf, border: `1.5px dashed ${c.brd}` }}>
+                <div className="op-empty-orb" style={{ background: dark ? "rgba(59,130,246,.05)" : "rgba(59,130,246,.04)" }}>
+                  <FiShoppingCart size={30} color={dark ? "#2e2e4a" : "#d8d8ee"} strokeWidth={1.4} />
+                </div>
+                <p className="op-empty-title" style={{ color: c.txt }}>No carts yet</p>
+                <p className="op-empty-sub" style={{ color: c.sub }}>Add items from stores to build your cart</p>
+              </div>
+            ) : (
+              <div className="op-cart-list">
+                {vendorGroups.map((group, i) => {
+                  const groupTotal = group.items.reduce((s, it) => s + parsePrice(it.price) * it.qty, 0);
+                  const uniqueItems = group.items.filter(
+                    (it: any, idx: number, arr: any[]) => arr.findIndex((x: any) => x.name === it.name) === idx
+                  );
+                  const cartRoute = `/orders/cart/${group.vendorId || encodeURIComponent(group.vendorName)}`;
+                  return (
+                    <div
+                      key={group.vendorId || i}
+                      className="op-cart-card"
+                      style={{ background: c.card, border: `1.5px solid ${c.brd}`, animationDelay: `${i * 0.08}s` }}
+                      onClick={() => navigate(cartRoute)}
+                    >
+                      {/* FIX: Vendor logo shown in the card avatar */}
+                      <div className="op-cart-avatar" style={{ background: "rgba(255,107,0,.09)", border: "1.5px solid rgba(255,107,0,.18)", overflow: "hidden" }}>
+                        {group.vendorLogo
+                          ? <img src={group.vendorLogo} alt={group.vendorName} style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: 14 }} />
+                          : <MdOutlineStorefront size={22} color={ACCENT} />}
+                      </div>
+                      <div className="op-cart-info">
+                        <div className="op-cart-vrow">
+                          <span className="op-cart-vname" style={{ color: c.txt }}>{group.vendorName}</span>
+                          {group.vendorVerified && <RiVerifiedBadgeFill size={13} color="#3b82f6" />}
+                          <span className="op-cart-badge" style={{ background: ACCENT }}>{group.itemCount}</span>
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 1, marginBottom: 4 }}>
+                          {uniqueItems.slice(0, 2).map((it: any, j: number) => (
+                            <div key={j} className="op-cart-item-row" style={{ color: c.sub }}>
+                              <span style={{ color: ACCENT, fontWeight: 800, fontSize: 11 }}>{it.qty}×</span> {it.name}
+                            </div>
+                          ))}
+                          {uniqueItems.length > 2 && (
+                            <button
+                              className="op-cart-viewall"
+                              style={{ color: ACCENT, background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}
+                              onClick={e => { e.stopPropagation(); navigate(cartRoute); }}
+                            >
+                              + {uniqueItems.length - 2} more item{uniqueItems.length - 2 !== 1 ? "s" : ""} — View all
+                            </button>
+                          )}
+                        </div>
+                        <div className="op-cart-total" style={{ color: ACCENT }}>
+                          ₦{groupTotal.toLocaleString()}
+                        </div>
+                      </div>
+                      <div className="op-cart-continue" style={{ color: ACCENT }}>
+                        <span style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".5px" }}>Continue</span>
+                        <FiArrowRight size={14} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+
+          {/* ── History link ── */}
+          <div
+            className="op-history-card"
+            style={{ background: dark ? "#111118" : "#f5f5ff", border: `1.5px solid ${c.brd}` }}
+            onClick={() => navigate("/profile?tab=history")}
+          >
+            <div className="op-history-icon" style={{ background: "rgba(255,107,0,.09)" }}>
+              <FiPackage size={18} color={ACCENT} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <p style={{ color: c.txt, fontWeight: 700, fontSize: 13, margin: 0 }}>
+                Review past orders or reorder?
+              </p>
+              <p style={{ color: ACCENT, fontWeight: 800, fontSize: 12, margin: "3px 0 0", display: "flex", alignItems: "center", gap: 4 }}>
+                Check your order history <FiExternalLink size={11} />
+              </p>
+            </div>
           </div>
-          <button className={`pob-cta ${isArriving ? "green" : "orange"}`} onClick={e => { e.stopPropagation(); onTrack(); }}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
-            </svg>
-            Track
-          </button>
+
+          <div style={{ height: 120 }} />
         </div>
       </div>
     </>
   );
 }
 
-// ── Address picker ────────────────────────────────────────────────────────────
-function AddressPicker({ addresses, selected, onSelect, loading, dark, c }: {
-  addresses: SavedAddress[]; selected: SavedAddress | null;
-  onSelect: (addr: SavedAddress | null) => void;
-  loading: boolean; dark: boolean; c: Record<string, string>;
-}) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-  const labelIcon = (label: string) => {
-    if (label === "Home") return <FiHome size={13} />;
-    if (label === "Work") return <FiBriefcase size={13} />;
-    return <FiMapPin size={13} />;
-  };
-  return (
-    <div ref={ref} style={{ position: "relative" }}>
-      <button
-        onClick={() => setOpen(v => !v)} disabled={loading}
-        style={{
-          width: "100%", display: "flex", alignItems: "center", gap: 10,
-          background: c.inp, border: `1.5px solid ${open ? ACCENT : c.inpB}`,
-          borderRadius: 14, padding: "11px 14px",
-          cursor: loading ? "not-allowed" : "pointer",
-          transition: "border-color .2s,box-shadow .2s",
-          boxShadow: open ? `0 0 0 3px rgba(255,107,0,0.12)` : "none",
-          outline: "none", opacity: loading ? 0.6 : 1,
-        }}
-      >
-        <div style={{
-          width: 32, height: 32, borderRadius: 9,
-          background: selected ? "rgba(255,107,0,0.12)" : c.surf,
-          border: `1px solid ${selected ? "rgba(255,107,0,0.25)" : c.brd}`,
-          display: "flex", alignItems: "center", justifyContent: "center",
-          color: selected ? ACCENT : c.sub, flexShrink: 0,
-        }}>
-          {loading ? <span style={{ display: "inline-block", animation: "cp-spin .7s linear infinite" }}>⟳</span>
-            : selected ? labelIcon(selected.label) : <FiNavigation size={13} />}
-        </div>
-        <div style={{ flex: 1, textAlign: "left", minWidth: 0 }}>
-          {selected ? (
-            <>
-              <div style={{ fontSize: 11, fontWeight: 800, color: ACCENT, textTransform: "uppercase", letterSpacing: ".5px", lineHeight: 1 }}>{selected.label}</div>
-              <div style={{ fontSize: 12.5, fontWeight: 600, color: c.txt, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selected.address}</div>
-            </>
-          ) : (
-            <div style={{ fontSize: 13, fontWeight: 600, color: c.sub }}>{loading ? "Loading your addresses…" : "Choose a delivery address"}</div>
-          )}
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
-          {selected && (
-            <div role="button" onClick={e => { e.stopPropagation(); onSelect(null); }}
-              style={{ width: 22, height: 22, borderRadius: 6, background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", display: "flex", alignItems: "center", justifyContent: "center", color: "#ef4444", cursor: "pointer" }}>
-              <FiX size={11} />
-            </div>
-          )}
-          <FiChevronDown size={15} style={{ color: c.sub, transform: open ? "rotate(180deg)" : "rotate(0deg)", transition: "transform .2s" }} />
-        </div>
-      </button>
-      {open && (
-        <div style={{
-          position: "absolute", top: "calc(100% + 6px)", left: 0, right: 0,
-          background: c.surf, border: `1.5px solid ${c.brd}`, borderRadius: 16,
-          overflow: "hidden", boxShadow: "0 16px 48px rgba(0,0,0,0.25)",
-          animation: "cp-dropdown-in .18s cubic-bezier(.34,1.56,.64,1)", zIndex: 9999,
-        }}>
-          {addresses.length === 0 ? (
-            <div style={{ padding: "20px 16px", textAlign: "center", color: c.sub, fontSize: 13, fontWeight: 600 }}>
-              No saved addresses yet. <a href="/profile" style={{ color: ACCENT, fontWeight: 700 }}>Add one in your profile →</a>
-            </div>
-          ) : (
-            <>
-              <button onClick={() => { onSelect(null); setOpen(false); }}
-                style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", background: !selected ? `rgba(255,107,0,0.06)` : "transparent", border: "none", borderBottom: `1px solid ${c.brd}`, cursor: "pointer", outline: "none" }}>
-                <div style={{ width: 32, height: 32, borderRadius: 9, background: !selected ? "rgba(255,107,0,0.12)" : c.inp, border: `1px solid ${!selected ? "rgba(255,107,0,0.3)" : c.inpB}`, display: "flex", alignItems: "center", justifyContent: "center", color: !selected ? ACCENT : c.sub, flexShrink: 0 }}>
-                  <FiNavigation size={13} />
-                </div>
-                <div style={{ textAlign: "left" }}>
-                  <div style={{ fontSize: 12.5, fontWeight: 700, color: !selected ? ACCENT : c.txt }}>Use my current location (GPS)</div>
-                  <div style={{ fontSize: 11, color: c.sub, fontWeight: 600 }}>Automatically detect where you are</div>
-                </div>
-                {!selected && <FiCheckCircle size={14} color={ACCENT} style={{ marginLeft: "auto" }} />}
-              </button>
-              {addresses.map((addr, i) => {
-                const isActive = selected?.id === addr.id;
-                const isLast   = i === addresses.length - 1;
-                return (
-                  <button key={addr.id} onClick={() => { onSelect(addr); setOpen(false); }}
-                    style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", background: isActive ? "rgba(255,107,0,0.06)" : "transparent", border: "none", borderBottom: isLast ? "none" : `1px solid ${c.brd}`, cursor: "pointer", outline: "none" }}>
-                    <div style={{ width: 32, height: 32, borderRadius: 9, background: isActive ? "rgba(255,107,0,0.12)" : c.inp, border: `1px solid ${isActive ? "rgba(255,107,0,0.3)" : c.inpB}`, display: "flex", alignItems: "center", justifyContent: "center", color: isActive ? ACCENT : c.sub, flexShrink: 0 }}>
-                      {labelIcon(addr.label)}
-                    </div>
-                    <div style={{ textAlign: "left", flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 11, fontWeight: 800, color: isActive ? ACCENT : c.sub, textTransform: "uppercase", letterSpacing: ".5px", display: "flex", alignItems: "center", gap: 6 }}>
-                        {addr.label}
-                        {addr.isDefault && <span style={{ fontSize: 9, fontWeight: 800, padding: "1px 6px", borderRadius: 20, background: "rgba(255,107,0,0.12)", color: ACCENT, border: "1px solid rgba(255,107,0,0.25)" }}>Default</span>}
-                      </div>
-                      <div style={{ fontSize: 12.5, fontWeight: 600, color: c.txt, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{addr.address}</div>
-                      {addr.landmark && <div style={{ fontSize: 11, color: c.sub, marginTop: 1 }}>📍 {addr.landmark}</div>}
-                    </div>
-                    {isActive && <FiCheckCircle size={14} color={ACCENT} style={{ flexShrink: 0 }} />}
-                  </button>
-                );
-              })}
-            </>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
+// ══════════════════════════════════════════════════════════════════════════════
+// VENDOR CART PAGE — Route: /orders/cart/:vendorId
+// FIX: vendor logo in sticky pay bar, sticky bar always visible, order summary with promo
+// ══════════════════════════════════════════════════════════════════════════════
+export function VendorCartPage() {
+  const { theme } = useTheme();
+  const dark = theme === "dark";
+  const navigate = useNavigate();
+  const { cart, addToCart, removeOne } = useCart();
+  const c = useColors(dark);
 
-// ── Payment method modal ──────────────────────────────────────────────────────
-function PaymentMethodModal({ total, walletBalance, walletLoading, onPaystack, onWallet, onClose, dark, c }: {
-  total: number; walletBalance: number | null; walletLoading: boolean;
-  onPaystack: () => void; onWallet: () => void; onClose: () => void;
-  dark: boolean; c: Record<string, string>;
-}) {
-  const hasEnough = walletBalance !== null && walletBalance >= total;
-  return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", backdropFilter: "blur(6px)", zIndex: 10000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20, animation: "cp-fade-in .2s ease" }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: c.surf, border: `1.5px solid ${c.brd}`, borderRadius: 28, padding: 28, width: "100%", maxWidth: 420, display: "flex", flexDirection: "column", gap: 20, animation: "cp-modal-in .3s cubic-bezier(.34,1.56,.64,1)", boxShadow: "0 32px 80px rgba(0,0,0,0.4)" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <div>
-            <div style={{ fontFamily: "Syne,sans-serif", fontSize: 20, fontWeight: 900, color: c.txt, letterSpacing: "-0.5px" }}>Choose Payment</div>
-            <div style={{ fontSize: 12, color: c.sub, fontWeight: 600, marginTop: 3 }}>How would you like to pay?</div>
-          </div>
-          <button onClick={onClose} style={{ width: 36, height: 36, borderRadius: 10, border: `1px solid ${c.brd}`, background: c.inp, color: c.sub, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <FiX size={16} />
-          </button>
-        </div>
-        <div style={{ background: `rgba(255,107,0,0.06)`, border: `1.5px solid rgba(255,107,0,0.15)`, borderRadius: 16, padding: "14px 18px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <span style={{ fontSize: 13, fontWeight: 700, color: c.sub }}>Order Total</span>
-          <span style={{ fontFamily: "Syne,sans-serif", fontSize: 22, fontWeight: 900, color: ACCENT }}>₦{total.toLocaleString()}</span>
-        </div>
-        <button onClick={hasEnough ? onWallet : undefined} disabled={!hasEnough || walletLoading}
-          style={{ width: "100%", padding: "18px 20px", borderRadius: 20, background: hasEnough ? `rgba(16,185,129,0.06)` : c.inp, border: `2px solid ${hasEnough ? "rgba(16,185,129,0.3)" : c.brd}`, cursor: hasEnough ? "pointer" : "not-allowed", display: "flex", alignItems: "center", gap: 16, transition: "all .2s", outline: "none", opacity: walletLoading ? 0.6 : 1 }}
-          onMouseEnter={e => { if (hasEnough) (e.currentTarget as HTMLButtonElement).style.borderColor = "#10B981"; }}
-          onMouseLeave={e => { if (hasEnough) (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(16,185,129,0.3)"; }}>
-          <div style={{ width: 48, height: 48, borderRadius: 14, flexShrink: 0, background: hasEnough ? "rgba(16,185,129,0.12)" : c.surf, border: `1.5px solid ${hasEnough ? "rgba(16,185,129,0.25)" : c.brd}`, display: "flex", alignItems: "center", justifyContent: "center", color: hasEnough ? "#10B981" : c.sub }}>
-            <RiWalletLine size={22} />
-          </div>
-          <div style={{ flex: 1, textAlign: "left" }}>
-            <div style={{ fontFamily: "Syne,sans-serif", fontSize: 15, fontWeight: 800, color: hasEnough ? c.txt : c.sub }}>Pay with Wallet</div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
-              {walletLoading ? <span style={{ fontSize: 12, color: c.sub, fontWeight: 600 }}>Loading balance…</span> : (
-                <>
-                  <span style={{ fontSize: 13, fontWeight: 800, color: hasEnough ? "#10B981" : "#ef4444", background: hasEnough ? "rgba(16,185,129,0.1)" : "rgba(239,68,68,0.08)", border: `1px solid ${hasEnough ? "rgba(16,185,129,0.25)" : "rgba(239,68,68,0.2)"}`, borderRadius: 8, padding: "2px 8px" }}>
-                    ₦{(walletBalance ?? 0).toLocaleString("en-NG", { minimumFractionDigits: 2 })} available
-                  </span>
-                  {!hasEnough && <span style={{ fontSize: 11, color: "#ef4444", fontWeight: 700 }}>Insufficient balance</span>}
-                </>
-              )}
-            </div>
-            {!hasEnough && !walletLoading && <div style={{ fontSize: 11, color: c.sub, fontWeight: 600, marginTop: 3 }}>Top up your wallet in your profile</div>}
-          </div>
-          {hasEnough && <div style={{ width: 28, height: 28, borderRadius: 8, background: "rgba(16,185,129,0.15)", border: "1px solid rgba(16,185,129,0.3)", display: "flex", alignItems: "center", justifyContent: "center", color: "#10B981", flexShrink: 0 }}><FiArrowRight size={14} /></div>}
-        </button>
-        <button onClick={onPaystack}
-          style={{ width: "100%", padding: "18px 20px", borderRadius: 20, background: `rgba(255,107,0,0.04)`, border: `2px solid rgba(255,107,0,0.2)`, cursor: "pointer", display: "flex", alignItems: "center", gap: 16, transition: "all .2s", outline: "none" }}
-          onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = ACCENT; (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,107,0,0.08)"; }}
-          onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(255,107,0,0.2)"; (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,107,0,0.04)"; }}>
-          <div style={{ width: 48, height: 48, borderRadius: 14, flexShrink: 0, background: "rgba(255,107,0,0.12)", border: "1.5px solid rgba(255,107,0,0.25)", display: "flex", alignItems: "center", justifyContent: "center", color: ACCENT }}><FiZap size={22} /></div>
-          <div style={{ flex: 1, textAlign: "left" }}>
-            <div style={{ fontFamily: "Syne,sans-serif", fontSize: 15, fontWeight: 800, color: c.txt }}>Pay with Paystack</div>
-            <div style={{ fontSize: 12, color: c.sub, fontWeight: 600, marginTop: 4 }}>Card · Bank transfer · USSD · QR</div>
-          </div>
-          <div style={{ width: 28, height: 28, borderRadius: 8, background: "rgba(255,107,0,0.15)", border: "1px solid rgba(255,107,0,0.3)", display: "flex", alignItems: "center", justifyContent: "center", color: ACCENT, flexShrink: 0 }}><FiArrowRight size={14} /></div>
-        </button>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontSize: 11, fontWeight: 600, color: c.sub }}>
-          <FiShield size={12} /> All payments are encrypted and secure
-        </div>
-      </div>
-    </div>
-  );
-}
+  const vendorId = window.location.pathname.split("/").pop() || "";
 
-// ── Main CartPage ─────────────────────────────────────────────────────────────
-export default function CartPage() {
-  const { theme }  = useTheme();
-  const dark       = theme === "dark";
-  const { cart, addToCart, removeOne, clearItem, clearCart, cartCount, cartLoading } = useCart();
-  const navigate   = useNavigate();
+  const [vendor, setVendor] = useState<any>(null);
+  const [featuredProducts, setFeaturedProducts] = useState<any[]>([]);
+  const [loadingProducts, setLoadingProducts] = useState(true);
+  const [savedAddresses, setSavedAddresses] = useState<SavedAddress[]>([]);
+  const [selectedAddress, setSelectedAddress] = useState<SavedAddress | null>(null);
+  const [showAddressPage, setShowAddressPage] = useState(false);
+  const [showPaymentSheet, setShowPaymentSheet] = useState(false);
+  const [addedIds, setAddedIds] = useState<Set<string>>(new Set());
 
-  const [promoCode,         setPromoCode]         = useState("");
-  const [promoApplied,      setPromoApplied]       = useState(false);
-  const [promoErr,          setPromoErr]           = useState("");
-  const [promoData,         setPromoData]          = useState<{ type: string; value: number } | null>(null);
-  const [deliveryFee,       setDeliveryFee]        = useState<number>(0);
-  const [deliveryLoading,   setDeliveryLoading]    = useState(false);
-  const [deliveryBreakdown, setDeliveryBreakdown]  = useState<string>("");
-  const [checkoutLoading,   setCheckoutLoading]    = useState(false);
-  const [paySuccess,        setPaySuccess]         = useState(false);
-  const [showPaymentModal,  setShowPaymentModal]   = useState(false);
-  const [walletBalance,     setWalletBalance]      = useState<number | null>(null);
-  const [walletLoading,     setWalletLoading]      = useState(false);
-  const [savedAddresses,    setSavedAddresses]     = useState<SavedAddress[]>([]);
-  const [addressesLoading,  setAddressesLoading]   = useState(false);
-  const [selectedAddress,   setSelectedAddress]    = useState<SavedAddress | null>(null);
-
-  const { pendingOrderId, pendingOrderStatus } = usePendingOrder();
+  // FIX: Promo + delivery state
+  const [promoCode, setPromoCode] = useState("");
+  const [promoApplied, setPromoApplied] = useState(false);
+  const [promoErr, setPromoErr] = useState("");
+  const [promoData, setPromoData] = useState<{ type: string; value: number } | null>(null);
+  const [deliveryFee, setDeliveryFee] = useState<number>(800);
+  const [deliveryLoading, setDeliveryLoading] = useState(false);
+  const [deliveryBreakdown, setDeliveryBreakdown] = useState<string>("");
   const lastCartSig = useRef<string>("");
 
-  const c = {
-    bg:   dark ? "#0a0a0e" : "#f2f2fa",
-    surf: dark ? "#13131a" : "#ffffff",
-    brd:  dark ? "#1e1e2c" : "#e0e0ee",
-    txt:  dark ? "#eeeef8" : "#111118",
-    sub:  dark ? "#66668a" : "#7777a2",
-    dim:  dark ? "#30304a" : "#c0c0d8",
-    inp:  dark ? "#16161f" : "#f7f7ff",
-    inpB: dark ? "#26263a" : "#d4d4ee",
-  };
+  // Allergy / special note — pre-filled from user profile, editable inline
+  const [allergyNote, setAllergyNote] = useState("");
+  const [allergyEditing, setAllergyEditing] = useState(false);
+
+  const vendorCart = cart.filter(it =>
+    it.vendorId === vendorId ||
+    (!it.vendorId && encodeURIComponent(it.vendorName || "") === vendorId)
+  );
+  const subtotal = vendorCart.reduce((s, it) => s + parsePrice(it.price) * it.qty, 0);
+  const totalItems = vendorCart.reduce((s, it) => s + it.qty, 0);
+
+  const discount = promoApplied && promoData
+    ? promoData.type === "percentage" ? Math.round(subtotal * (promoData.value / 100)) : promoData.value
+    : 0;
+  const total = subtotal > 0 ? subtotal - discount + deliveryFee : 0;
+
+  useEffect(() => {
+    if (!vendorId) return;
+    (async () => {
+      try {
+        const vSnap = await getDoc(doc(db, "vendors", vendorId));
+        if (vSnap.exists()) setVendor({ id: vendorId, ...vSnap.data() });
+        const pSnap = await getDocs(
+          query(collection(db, "products"), where("vendorId", "==", vendorId), limit(6))
+        );
+        setFeaturedProducts(pSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      } catch { /* ignore */ }
+      finally { setLoadingProducts(false); }
+    })();
+  }, [vendorId]);
 
   useEffect(() => {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
-    setAddressesLoading(true);
-    getDoc(doc(db, "users", uid))
-      .then(snap => {
-        if (!snap.exists()) return;
-        const addrs: SavedAddress[] = snap.data().savedAddresses ?? [];
-        setSavedAddresses(addrs);
-        const def = addrs.find(a => a.isDefault);
-        if (def) setSelectedAddress(def);
-      })
-      .catch(err => console.warn("[CartPage] Could not load addresses:", err))
-      .finally(() => setAddressesLoading(false));
+    getDoc(doc(db, "users", uid)).then(snap => {
+      if (!snap.exists()) return;
+      const addrs: SavedAddress[] = snap.data().savedAddresses ?? [];
+      setSavedAddresses(addrs);
+      const def = addrs.find(a => a.isDefault);
+      if (def) setSelectedAddress(def);
+      // Pre-fill allergy note from profile preferences
+      const note = snap.data().allergiesNote || "";
+      if (note) setAllergyNote(note);
+    });
   }, []);
 
-  const loadWalletBalance = useCallback(async () => {
-    const uid = auth.currentUser?.uid;
-    if (!uid) return;
-    setWalletLoading(true);
-    try {
-      const snap = await getDoc(doc(db, "wallets", uid));
-      setWalletBalance(snap.exists() ? (snap.data().balance ?? 0) : 0);
-    } catch (e) {
-      console.warn("[CartPage] Could not load wallet:", e);
-      setWalletBalance(0);
-    } finally {
-      setWalletLoading(false);
-    }
-  }, []);
-
-  const getVendorCoords = useCallback(async (vendorName: string): Promise<{ lat: number; lng: number; approximate: boolean } | null> => {
-    if (!vendorName) return null;
-    const cacheKey = `vendor:${vendorName}`;
-    if (coordCache.has(cacheKey)) {
-      const cached = coordCache.get(cacheKey);
-      return cached ? { ...cached, approximate: cached.approximate ?? false } : null;
-    }
-    const nameFields = ["businessName", "storeName", "displayName", "name", "shopName"];
-    let vendorDoc: Record<string, unknown> | null = null;
-    for (const field of nameFields) {
-      try {
-        const snap = await getDocs(query(collection(db, "vendors"), where(field, "==", vendorName), limit(1)));
-        if (!snap.empty) { vendorDoc = snap.docs[0].data() as Record<string, unknown>; break; }
-      } catch { /* continue */ }
-    }
-    if (!vendorDoc) { coordCache.set(cacheKey, null); return null; }
-    if (typeof vendorDoc.lat === "number" && typeof vendorDoc.lng === "number") {
-      const r = { lat: vendorDoc.lat as number, lng: vendorDoc.lng as number, approximate: false };
-      coordCache.set(cacheKey, r); return r;
-    }
-    type GP = { latitude: number; longitude: number };
-    for (const k of ["geopoint", "location", "coordinates"]) {
-      const gp = vendorDoc[k] as GP | undefined;
-      if (gp?.latitude) { const r = { lat: gp.latitude, lng: gp.longitude, approximate: false }; coordCache.set(cacheKey, r); return r; }
-    }
-    type LL = { lat: number; lng: number };
-    for (const k of ["location", "coordinates"]) {
-      const ll = vendorDoc[k] as LL | undefined;
-      if (ll?.lat) { const r = { lat: ll.lat, lng: ll.lng, approximate: false }; coordCache.set(cacheKey, r); return r; }
-    }
-    const addrStr = (vendorDoc.address ?? vendorDoc.storeAddress) as string | undefined;
-    const city    = (vendorDoc.city ?? "") as string;
-    if (typeof addrStr === "string" && addrStr.trim()) {
-      const full   = [addrStr.trim(), city.trim(), "Nigeria"].filter(Boolean).join(", ");
-      const coords = await geocodeAddress(full);
-      coordCache.set(cacheKey, coords); return coords;
-    }
-    coordCache.set(cacheKey, null); return null;
-  }, []);
-
-  const resolveVendorNameForProduct = useCallback(async (productName: string): Promise<string | null> => {
-    const cacheKey = `product-vendor:${productName}`;
-    if ((coordCache as unknown as Map<string, unknown>).has(cacheKey)) {
-      return (coordCache as unknown as Map<string, string | null>).get(cacheKey) ?? null;
-    }
-    try {
-      for (const field of ["name", "productName", "title"]) {
-        const snap = await getDocs(query(collection(db, "products"), where(field, "==", productName), limit(1)));
-        if (!snap.empty) {
-          const data = snap.docs[0].data();
-          const vn   = data.vendorName ?? data.businessName ?? data.vendor ?? null;
-          (coordCache as unknown as Map<string, string | null>).set(cacheKey, vn);
-          return vn as string | null;
-        }
-      }
-    } catch { /* continue */ }
-    (coordCache as unknown as Map<string, string | null>).set(cacheKey, null);
-    return null;
-  }, []);
-
-  const resolveUserCoords = useCallback(async (): Promise<{ lat: number; lng: number; source: "saved" | "gps" | "none"; approximate: boolean }> => {
-    if (selectedAddress?.lat && selectedAddress?.lng) {
-      return { lat: selectedAddress.lat, lng: selectedAddress.lng, source: "saved", approximate: false };
-    }
-    if (selectedAddress?.address) {
-      const coords = await geocodeAddress(selectedAddress.address);
-      if (coords) return { lat: coords.lat, lng: coords.lng, source: "saved", approximate: coords.approximate };
-    }
-    try {
-      const pos = await getUserCoords();
-      return { lat: Math.round(pos.latitude * 1000) / 1000, lng: Math.round(pos.longitude * 1000) / 1000, source: "gps", approximate: false };
-    } catch {
-      return { lat: 0, lng: 0, source: "none", approximate: false };
-    }
-  }, [selectedAddress]);
-
+  // FIX: Compute delivery fee (ported from CartPage)
   const computeDelivery = useCallback(async () => {
-    if (cart.length === 0) { setDeliveryFee(0); setDeliveryBreakdown(""); return; }
-    if (cartLoading) return;
+    if (vendorCart.length === 0) { setDeliveryFee(0); return; }
     const addrSig = selectedAddress?.id ?? "gps";
-    const sig = [cart.map(i => `${i.vendorName ?? ""}:${i.name}:${i.qty}`).join("|"), addrSig].join("@");
+    const sig = [vendorCart.map(i => `${i.name}:${i.qty}`).join("|"), addrSig].join("@");
     if (sig === lastCartSig.current) return;
     lastCartSig.current = sig;
     setDeliveryLoading(true);
     try {
-      const userPos = await resolveUserCoords();
-      if (userPos.source === "none" || (userPos.lat === 0 && userPos.lng === 0)) {
+      // Resolve user coords
+      let userLat = 0, userLng = 0, userApprox = false;
+      if (selectedAddress?.lat && selectedAddress?.lng) {
+        userLat = selectedAddress.lat; userLng = selectedAddress.lng;
+      } else if (selectedAddress?.address) {
+        const coords = await geocodeAddress(selectedAddress.address);
+        if (coords) { userLat = coords.lat; userLng = coords.lng; userApprox = coords.approximate; }
+      } else {
+        try {
+          const pos = await getUserCoords();
+          userLat = pos.latitude; userLng = pos.longitude;
+        } catch { /* use flat fee */ }
+      }
+
+      if (userLat === 0 && userLng === 0) {
         setDeliveryFee(MIN_FEE);
-        setDeliveryBreakdown(selectedAddress ? "Could not locate that address — flat fee applied" : "Enable location for an exact fee");
+        setDeliveryBreakdown(selectedAddress ? "Could not locate address — flat fee applied" : "Enable GPS for exact fee");
         return;
       }
-      const { lat: userLat, lng: userLng, approximate: userApprox } = userPos;
 
-      const vendorGroups = new Map<string, typeof cart>();
-      for (const item of cart) {
-        let vn = item.vendorName;
-        if ((!vn || vn === "unknown") && item.vendorId) {
-          try {
-            const vsnap = await getDoc(doc(db, "vendors", item.vendorId));
-            if (vsnap.exists()) {
-              const vdata = vsnap.data();
-              vn = vdata.businessName || vdata.storeName || vdata.displayName || vn;
-              if (typeof vdata.lat === "number" && typeof vdata.lng === "number") {
-                const key = item.vendorId;
-                if (!vendorGroups.has(key)) vendorGroups.set(key, []);
-                vendorGroups.get(key)!.push({ ...item, vendorName: vn, vendorLat: vdata.lat, vendorLng: vdata.lng });
-                continue;
-              }
-            }
-          } catch { /* continue */ }
-        }
-        if (!vn || vn === "unknown") vn = (await resolveVendorNameForProduct(item.name)) ?? undefined;
-        const key = vn ?? (item.vendorId ? `id:${item.vendorId}` : `_coords_${item.vendorLat}_${item.vendorLng}`);
-        if (!vendorGroups.has(key)) vendorGroups.set(key, []);
-        vendorGroups.get(key)!.push({ ...item, vendorName: vn });
+      // Resolve vendor coords
+      let vendorLat = vendor?.lat, vendorLng = vendor?.lng;
+      if ((!vendorLat || !vendorLng) && vendor?.address) {
+        const coords = await geocodeAddress([vendor.address, vendor.city, "Nigeria"].filter(Boolean).join(", "));
+        if (coords) { vendorLat = coords.lat; vendorLng = coords.lng; }
       }
 
-      const vendorKeys = [...vendorGroups.keys()].filter(vn => {
-        const item = vendorGroups.get(vn)![0];
-        return (item.vendorLat && item.vendorLng) || (vn && !vn.startsWith("_coords_undefined")) || vn.startsWith("id:");
-      });
-
-      if (vendorKeys.length === 0) {
-        setDeliveryFee(MIN_FEE); setDeliveryBreakdown("Vendor location unavailable — flat fee applied"); return;
+      if (!vendorLat || !vendorLng) {
+        setDeliveryFee(MIN_FEE);
+        setDeliveryBreakdown("Vendor location unavailable — flat fee applied");
+        return;
       }
 
-      const coordResults = await Promise.all(
-        vendorKeys.map(async (vn) => {
-          const item = vendorGroups.get(vn)![0];
-          if (item.vendorLat && item.vendorLng) return { name: vn, lat: item.vendorLat, lng: item.vendorLng, approximate: false };
-          if (item.vendorId) {
-            try {
-              const vsnap = await getDoc(doc(db, "vendors", item.vendorId));
-              if (vsnap.exists()) {
-                const vdata = vsnap.data();
-                if (typeof vdata.lat === "number" && typeof vdata.lng === "number") return { name: vn, lat: vdata.lat, lng: vdata.lng, approximate: false };
-                const addr = [vdata.address || vdata.storeAddress, vdata.city, "Nigeria"].filter(Boolean).join(", ");
-                if (addr) { const coords = await geocodeAddress(addr); if (coords) return { name: vn, ...coords }; }
-              }
-            } catch { /* continue */ }
-          }
-          const coords = await getVendorCoords(vn);
-          return coords ? { name: vn, ...coords } : null;
-        })
-      );
-
-      const resolved = coordResults.filter(Boolean) as Array<{ name: string; lat: number; lng: number; approximate: boolean }>;
-      if (resolved.length === 0) { setDeliveryFee(MIN_FEE); setDeliveryBreakdown("Could not locate vendors — flat fee applied"); return; }
-
-      let totalFee = 0, anyApproximate = userApprox;
-      const primary         = resolved[0];
-      const primaryKm       = haversineKm(primary.lat, primary.lng, userLat, userLng);
-      const primaryItems    = vendorGroups.get(primary.name) ?? [];
-      const primaryShipping = await fetchShippingMeta(primaryItems[0].name);
-      totalFee = legFee(primary.lat, primary.lng, userLat, userLng, primaryShipping);
-      if (primary.approximate) { totalFee += LANDMARK_SURCHARGE; anyApproximate = true; }
-      for (let i = 1; i < resolved.length; i++) {
-        const v        = resolved[i];
-        const vKm      = haversineKm(v.lat, v.lng, userLat, userLng);
-        const detourKm = Math.max(0, vKm - primaryKm);
-        let surcharge  = detourKm < 2 ? MULTI_VENDOR_SURCHARGE : Math.round(detourKm * PER_KM) + MULTI_VENDOR_SURCHARGE;
-        if (v.approximate) { surcharge += LANDMARK_SURCHARGE; anyApproximate = true; }
-        totalFee += surcharge;
-      }
-      if (userApprox) totalFee += LANDMARK_SURCHARGE;
-      totalFee = Math.min(totalFee, MAX_FEE);
-
+      const fee = legFee(vendorLat, vendorLng, userLat, userLng, null);
+      const km = haversineKm(vendorLat, vendorLng, userLat, userLng);
       let breakdown = "";
-      if (anyApproximate)           breakdown = "Estimated — pin your address for a precise rate";
-      else if (resolved.length > 1) breakdown = `Covers pickup from ${resolved.length} stores`;
-      else {
-        if (primaryKm < 3)       breakdown = "Within 3 km";
-        else if (primaryKm < 7)  breakdown = "3 – 7 km away";
-        else if (primaryKm < 15) breakdown = "7 – 15 km away";
-        else                     breakdown = "15+ km away";
-      }
-      setDeliveryFee(totalFee);
+      if (userApprox) breakdown = "Estimated — pin your address for precise rate";
+      else if (km < 3) breakdown = "Within 3 km";
+      else if (km < 7) breakdown = "3 – 7 km away";
+      else if (km < 15) breakdown = "7 – 15 km away";
+      else breakdown = "15+ km away";
+
+      setDeliveryFee(Math.min(fee + (userApprox ? LANDMARK_SURCHARGE : 0), MAX_FEE));
       setDeliveryBreakdown(breakdown);
-    } catch (e) {
-      console.error("[CartPage] Delivery error:", e);
+    } catch {
       setDeliveryFee(MIN_FEE);
       setDeliveryBreakdown("Could not calculate — flat fee applied");
     } finally {
       setDeliveryLoading(false);
     }
-  }, [cart, cartLoading, selectedAddress, resolveUserCoords, getVendorCoords, resolveVendorNameForProduct]);
+  }, [vendorCart, selectedAddress, vendor]);
 
   useEffect(() => {
-    if (cart.length === 0 || cartLoading) return;
     lastCartSig.current = "";
     computeDelivery();
-  }, [computeDelivery, selectedAddress, cartLoading]);
+  }, [computeDelivery]);
 
-  const subtotal     = cart.reduce((s, i) => s + parsePrice(i.price) * i.qty, 0);
-  const anyEstimated = deliveryBreakdown.includes("Estimated") || (!!selectedAddress && !selectedAddress.lat);
-  const discount     = promoApplied && promoData
-    ? promoData.type === "percentage" ? Math.round(subtotal * (promoData.value / 100)) : promoData.value
-    : 0;
-  const total = subtotal > 0 ? subtotal - discount + deliveryFee : 0;
-
+  // FIX: Promo handler
   const handlePromo = async () => {
     const code = promoCode.trim().toUpperCase();
     if (!code) { setPromoErr("Enter a promo code"); return; }
     try {
       const snap = await getDocs(query(collection(db, "discounts"), where("code", "==", code), where("status", "==", "active")));
       if (snap.empty) { setPromoErr("Invalid or expired promo code"); setPromoApplied(false); return; }
-      const d   = snap.docs[0].data();
+      const d = snap.docs[0].data();
       const now = new Date();
-      if (d.startDate?.toDate() && now < d.startDate.toDate()) { setPromoErr("This promo hasn't started yet"); setPromoApplied(false); return; }
-      if (d.endDate?.toDate()   && now > d.endDate.toDate())   { setPromoErr("This promo code has expired");    setPromoApplied(false); return; }
-      if (d.usageLimit && d.usedCount >= d.usageLimit)         { setPromoErr("This promo code has reached its usage limit"); setPromoApplied(false); return; }
-      if (d.minOrderAmount && subtotal < d.minOrderAmount)     { setPromoErr(`Minimum order of ₦${d.minOrderAmount.toLocaleString()} required`); setPromoApplied(false); return; }
+      if (d.startDate?.toDate() && now < d.startDate.toDate()) { setPromoErr("This promo hasn't started yet"); return; }
+      if (d.endDate?.toDate() && now > d.endDate.toDate()) { setPromoErr("This promo has expired"); return; }
+      if (d.usageLimit && d.usedCount >= d.usageLimit) { setPromoErr("Promo usage limit reached"); return; }
+      if (d.minOrderAmount && subtotal < d.minOrderAmount) { setPromoErr(`Min order ₦${d.minOrderAmount.toLocaleString()} required`); return; }
       setPromoData({ type: d.type, value: d.value });
       setPromoApplied(true);
       setPromoErr("");
-    } catch (e) {
-      console.error("[Promo]", e);
-      setPromoErr("Could not validate code — try again");
+    } catch {
+      setPromoErr("Could not validate — try again");
     }
   };
 
-  const handleCheckoutClick = async () => {
-    if (cart.length === 0 || total === 0) return;
-    setShowPaymentModal(true);
-    loadWalletBalance();
+  const handleAddFeatured = (p: any) => {
+    addToCart({
+      name: p.name,
+      price: `₦${p.price}`,
+      img: p.images?.[0] || p.image || p.img || "",
+      vendorName: vendor?.businessName || vendor?.storeName || "",
+      vendorId,
+    });
+    setAddedIds(prev => new Set([...prev, p.id]));
+    setTimeout(() => setAddedIds(prev => { const s = new Set(prev); s.delete(p.id); return s; }), 1800);
   };
 
-  // ── Wallet pay ──────────────────────────────────────────────────────────────
-const handleWalletPay = async () => {
-  setShowPaymentModal(false);
-  setCheckoutLoading(true);
-  try {
-    const uid = auth.currentUser?.uid;
-    if (!uid) { alert("Please log in to checkout."); return; }
+  const vendorDisplayName = vendor?.businessName || vendor?.storeName || "Store";
+  // FIX: Vendor logo
+  const vendorLogo = vendor?.logo || vendor?.logoUrl || vendor?.image || vendor?.avatar || null;
 
-    const orderId = `SWIFT_${Date.now()}_${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
-    const customerPickupCode = Math.random().toString(36).slice(2, 8).toUpperCase();
-
-    const userSnap = await getDoc(doc(db, "users", uid));
-    const userData = userSnap.data();
-
-    // 1. Create the order first
-    await setDoc(doc(db, "orders", orderId), {
-      orderId, userId: uid,
-      customerName:  userData?.fullName || auth.currentUser?.displayName || "Customer",
-      customerEmail: userData?.email    || auth.currentUser?.email        || "",
-      customerPhone: userData?.phone    || "",
-      vendorId:   cart[0]?.vendorId   || "",
-      vendorName: cart[0]?.vendorName || "",
-      items: cart.map(i => ({ name: i.name, qty: i.qty, price: parsePrice(i.price), img: i.img || "", vendorName: i.vendorName || "", vendorId: i.vendorId || "" })),
-      subtotal, deliveryFee, discount, total,
-      deliveryAddress: selectedAddress?.address || "GPS location",
-      deliveryLabel:   selectedAddress?.label   || "GPS",
-      paymentMethod: "wallet",
-      customerPickupCode,
-      paymentStatus: "pending",
-      walletCharged: false,
-      status: "confirmed",
-      createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
-    });
-
-    // 2. Call splitWalletPayment — deducts from user, credits vendor + rider + platform
-    const splitFn = httpsCallable(fbFunctions, "splitWalletPayment");
-    await splitFn({ orderId });
-
-    clearCart();
-    navigate(`/orders/${orderId}/track`);
-  } catch (err: any) {
-    console.error("[WalletPay]", err);
-    alert("Wallet payment failed: " + (err?.message || String(err)));
-  } finally {
-    setCheckoutLoading(false);
+  if (showAddressPage) {
+    return (
+      <AddressPickerPage
+        dark={dark} c={c}
+        savedAddresses={savedAddresses}
+        selectedAddress={selectedAddress}
+        onSave={async (addr) => {
+          const uid = auth.currentUser?.uid;
+          if (uid) {
+            let list = savedAddresses.filter(a => a.id !== addr.id);
+            if (addr.isDefault) list = list.map(a => ({ ...a, isDefault: false }));
+            list = addr.isDefault ? [addr, ...list] : [...list, addr];
+            setSavedAddresses(list);
+            setSelectedAddress(addr);
+            await setDoc(doc(db, "users", uid), { savedAddresses: list, updatedAt: serverTimestamp() }, { merge: true });
+          }
+          setShowAddressPage(false);
+        }}
+        onBack={() => setShowAddressPage(false)}
+      />
+    );
   }
-};
 
-  // ── Paystack ────────────────────────────────────────────────────────────────
-  const handlePaystack = async () => {
-    setShowPaymentModal(false);
-    setCheckoutLoading(true);
+  if (showPaymentSheet) {
+    return (
+      <PaymentPage
+        dark={dark} c={c}
+        vendorCart={vendorCart}
+        subtotal={subtotal}
+        discount={discount}
+        deliveryFee={deliveryFee}
+        selectedAddress={selectedAddress}
+        vendorId={vendorId}
+        vendorName={vendorDisplayName}
+        onBack={() => setShowPaymentSheet(false)}
+        onSuccess={(orderId) => { setShowPaymentSheet(false); navigate(`/orders/${orderId}/track`); }}
+      />
+    );
+  }
+
+  const anyEstimated = deliveryBreakdown.includes("Estimated") || (!!selectedAddress && !selectedAddress.lat);
+
+  return (
+    <>
+      <style>{globalStyles(dark, c)}</style>
+      <div className="vcp-root" style={{ background: c.bg, color: c.txt }}>
+
+        {/* Header */}
+        <div className="vcp-header" style={{ background: c.surf, borderBottom: `1px solid ${c.brd}` }}>
+          <button className="vcp-back-btn" style={{ color: c.txt }} onClick={() => navigate(-1)}>
+            <FiArrowLeft size={20} />
+          </button>
+          {/* FIX: Show vendor logo in header */}
+          {vendorLogo && (
+            <div style={{ width: 34, height: 34, borderRadius: 10, overflow: "hidden", flexShrink: 0, border: `1.5px solid ${c.brd}` }}>
+              <img src={vendorLogo} alt={vendorDisplayName} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            </div>
+          )}
+          <div style={{ flex: 1 }}>
+            <div style={{ fontFamily: "'Syne',sans-serif", fontWeight: 800, fontSize: 16, color: c.txt }}>
+              {vendorDisplayName}
+            </div>
+            <div style={{ fontSize: 11, color: c.sub, fontWeight: 600 }}>
+              {totalItems} item{totalItems !== 1 ? "s" : ""} in cart
+            </div>
+          </div>
+          <div className="vcp-header-badge" style={{ background: "rgba(255,107,0,.1)", color: ACCENT }}>
+            <FiShoppingCart size={14} />
+            <span>{totalItems}</span>
+          </div>
+        </div>
+
+        {/* FIX: Scrollable content with padding-bottom so sticky bar doesn't cover content */}
+        <div className="vcp-body" style={{ paddingBottom: 160 }}>
+
+          {/* Cart items card */}
+          <div className="vcp-section-card" style={{ background: c.surf, border: `1.5px solid ${c.brd}` }}>
+            <div className="vcp-card-head" style={{ borderBottom: `1px solid ${c.brd}` }}>
+              <FiShoppingCart size={13} color={ACCENT} />
+              <span style={{ color: c.sub, fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".6px" }}>
+                Your cart · {vendorDisplayName}
+              </span>
+            </div>
+            {vendorCart.map(item => (
+              <div key={item.name} className="vcp-item" style={{ borderBottom: `1px solid ${c.brd}` }}>
+                <div className="vcp-item-thumb" style={{ background: "rgba(255,107,0,.07)" }}>
+                  {item.img
+                    ? <img src={item.img} alt={item.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    : <FiPackage size={20} color={dark ? "#333" : "#ccc"} />}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: c.txt, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {item.name}
+                  </div>
+                  <div style={{ fontSize: 13, fontWeight: 900, color: ACCENT, fontFamily: "'Syne',sans-serif" }}>{item.price}</div>
+                </div>
+                <div className="vcp-qty-row">
+                  <button className="vcp-qty-btn" style={{ color: ACCENT }} onPointerDown={() => removeOne(item.name)}>
+                    <FiMinus size={12} />
+                  </button>
+                  <span style={{ fontFamily: "'Syne',sans-serif", fontWeight: 800, fontSize: 14, color: c.txt, minWidth: 20, textAlign: "center" }}>
+                    {item.qty}
+                  </span>
+                  <button className="vcp-qty-btn" style={{ color: ACCENT }} onPointerDown={() => addToCart({ name: item.name, price: item.price, img: item.img, vendorName: item.vendorName, vendorId: item.vendorId })}>
+                    <FiPlus size={12} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Delivery address card */}
+          <div className="vcp-section-card" style={{ background: c.surf, border: `1.5px solid ${c.brd}` }}>
+            <div className="vcp-card-head" style={{ borderBottom: `1px solid ${c.brd}` }}>
+              <FiMapPin size={13} color={ACCENT} />
+              <span style={{ color: c.sub, fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".6px" }}>
+                Delivery address
+              </span>
+            </div>
+            {selectedAddress ? (
+              <div className="vcp-addr-row">
+                {(() => { const Icon = LABEL_ICONS[selectedAddress.label] || FiMapPin; const col = LABEL_COLORS[selectedAddress.label] || ACCENT; return (
+                  <div style={{ width: 38, height: 38, borderRadius: 11, background: `${col}18`, border: `1.5px solid ${col}30`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <Icon size={16} color={col} />
+                  </div>
+                ); })()}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 10, fontWeight: 800, color: LABEL_COLORS[selectedAddress.label] || ACCENT, textTransform: "uppercase", letterSpacing: ".5px" }}>
+                    {selectedAddress.label}
+                  </div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: c.txt, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {selectedAddress.address}
+                  </div>
+                </div>
+                <button className="vcp-change-btn" style={{ color: ACCENT, borderColor: "rgba(255,107,0,.25)", background: "rgba(255,107,0,.07)" }}
+                  onClick={() => setShowAddressPage(true)}>
+                  Change
+                </button>
+              </div>
+            ) : (
+              <button
+                className="vcp-add-addr"
+                style={{ color: ACCENT, border: `1.5px dashed rgba(255,107,0,.3)`, background: "rgba(255,107,0,.06)" }}
+                onClick={() => setShowAddressPage(true)}
+              >
+                <FiPlus size={15} /> Add delivery address
+              </button>
+            )}
+          </div>
+
+          {/* Allergy / Special Notes card */}
+          <div className="vcp-section-card" style={{ background: c.surf, border: `1.5px solid ${c.brd}` }}>
+            <div className="vcp-card-head" style={{ borderBottom: `1px solid ${c.brd}` }}>
+              <span style={{ fontSize: 14 }}>🌿</span>
+              <span style={{ color: c.sub, fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".6px", flex: 1 }}>
+                Allergies / Special Notes
+              </span>
+              <button
+                onClick={() => setAllergyEditing(v => !v)}
+                style={{ border: "none", cursor: "pointer", color: ACCENT, fontSize: 11, fontWeight: 800, padding: "2px 8px", borderRadius: 8, background: "rgba(255,107,0,.08)" }}
+              >
+                {allergyEditing ? "Done" : allergyNote ? "Edit" : "+ Add"}
+              </button>
+            </div>
+            <div style={{ padding: "12px 16px" }}>
+              {/* Show profile-pulled preferences as chips if no custom note */}
+              {!allergyNote && !allergyEditing && (
+                <button
+                  onClick={() => setAllergyEditing(true)}
+                  style={{
+                    width: "100%", display: "flex", alignItems: "center", justifyContent: "center",
+                    gap: 8, padding: 13, border: `1.5px dashed rgba(255,107,0,.3)`,
+                    borderRadius: 13, background: "rgba(255,107,0,.04)",
+                    color: ACCENT, fontFamily: "'DM Sans',sans-serif", fontSize: 13,
+                    fontWeight: 700, cursor: "pointer",
+                  }}
+                >
+                  <FiPlus size={14} /> Add allergy or special instruction
+                </button>
+              )}
+              {allergyNote && !allergyEditing && (
+                <div style={{
+                  display: "flex", alignItems: "flex-start", gap: 10,
+                  background: "rgba(255,107,0,.05)", border: "1px solid rgba(255,107,0,.15)",
+                  borderRadius: 12, padding: "10px 13px",
+                }}>
+                  <span style={{ fontSize: 16, flexShrink: 0 }}>📝</span>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: c.txt, lineHeight: 1.5, flex: 1 }}>
+                    {allergyNote}
+                  </span>
+                  <button onClick={() => { setAllergyNote(""); }} style={{ background: "none", border: "none", cursor: "pointer", color: "#ef4444", padding: 2, flexShrink: 0 }}>
+                    <FiX size={13} />
+                  </button>
+                </div>
+              )}
+              {allergyEditing && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  <textarea
+                    value={allergyNote}
+                    onChange={e => setAllergyNote(e.target.value)}
+                    placeholder="e.g. nut allergy, no onions, lactose intolerant, extra mild please…"
+                    autoFocus
+                    rows={3}
+                    style={{
+                      width: "100%", background: c.inp, border: `1.5px solid ${c.inpB}`,
+                      borderRadius: 12, padding: "10px 13px", color: c.txt,
+                      fontFamily: "'DM Sans',sans-serif", fontSize: 13, fontWeight: 600,
+                      outline: "none", resize: "none", lineHeight: 1.5,
+                    }}
+                  />
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button
+                      onClick={() => setAllergyEditing(false)}
+                      style={{
+                        flex: 1, background: `linear-gradient(135deg,${ACCENT},${ACCENT2})`,
+                        color: "white", border: "none", borderRadius: 11, padding: "10px 0",
+                        fontFamily: "'DM Sans',sans-serif", fontSize: 13, fontWeight: 800,
+                        cursor: "pointer",
+                      }}
+                    >
+                      <FiCheck size={13} style={{ marginRight: 5 }} /> Save Note
+                    </button>
+                    <button
+                      onClick={() => { setAllergyNote(""); setAllergyEditing(false); }}
+                      style={{
+                        padding: "10px 16px", background: "rgba(239,68,68,.08)",
+                        border: "1.5px solid rgba(239,68,68,.2)", borderRadius: 11,
+                        color: "#ef4444", fontFamily: "'DM Sans',sans-serif",
+                        fontSize: 12, fontWeight: 700, cursor: "pointer",
+                      }}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* FIX: Order Summary with promo code + delivery fee */}
+          <div className="vcp-section-card" style={{ background: c.surf, border: `1.5px solid ${c.brd}` }}>
+            <div className="vcp-card-head" style={{ borderBottom: `1px solid ${c.brd}` }}>
+              <FiTag size={13} color={ACCENT} />
+              <span style={{ color: c.sub, fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".6px" }}>
+                Order Summary
+              </span>
+            </div>
+
+            {/* Promo code input */}
+            <div style={{ padding: "12px 16px", borderBottom: `1px solid ${c.brd}` }}>
+              <div style={{ display: "flex", gap: 8 }}>
+                <input
+                  style={{
+                    flex: 1, background: c.inp, border: `1.5px solid ${promoApplied ? "#22c55e" : c.inpB}`,
+                    borderRadius: 12, padding: "10px 14px", fontFamily: "'DM Sans',sans-serif",
+                    fontSize: 12, fontWeight: 600, color: c.txt, outline: "none",
+                  }}
+                  placeholder="Enter promo code"
+                  value={promoCode}
+                  onChange={e => { setPromoCode(e.target.value); setPromoErr(""); if (promoApplied) { setPromoApplied(false); setPromoData(null); } }}
+                  disabled={promoApplied}
+                />
+                {promoApplied
+                  ? <div style={{ display: "flex", alignItems: "center", gap: 5, color: "#22c55e", fontWeight: 700, fontSize: 12, padding: "0 8px" }}>
+                      <FiCheck size={14} /> Applied!
+                    </div>
+                  : <button onClick={handlePromo}
+                      style={{ background: ACCENT, color: "#fff", border: "none", borderRadius: 12, padding: "10px 16px", fontFamily: "'DM Sans',sans-serif", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                      Apply
+                    </button>}
+              </div>
+              {promoErr && <div style={{ fontSize: 11, color: "#ef4444", fontWeight: 700, marginTop: 6 }}>✕ {promoErr}</div>}
+            </div>
+
+            {/* Line items */}
+            <div style={{ padding: "4px 16px 8px" }}>
+              {/* Subtotal */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 0", borderBottom: `1px solid ${c.brd}` }}>
+                <span style={{ fontSize: 13, color: c.sub, fontWeight: 600 }}>Subtotal ({totalItems} item{totalItems !== 1 ? "s" : ""})</span>
+                <span style={{ fontSize: 13, color: c.txt, fontWeight: 700 }}>₦{subtotal.toLocaleString()}</span>
+              </div>
+
+              {/* Discount — only shown when promo applied */}
+              {promoApplied && discount > 0 && (
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 0", borderBottom: `1px solid ${c.brd}` }}>
+                  <span style={{ fontSize: 13, color: "#22c55e", fontWeight: 600 }}>
+                    Discount ({promoData?.type === "percentage" ? `${promoData.value}%` : "fixed"})
+                  </span>
+                  <span style={{ fontSize: 13, color: "#22c55e", fontWeight: 700 }}>−₦{discount.toLocaleString()}</span>
+                </div>
+              )}
+
+              {/* Delivery fee */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "9px 0", borderBottom: `1px solid ${c.brd}` }}>
+                <div>
+                  <div style={{ fontSize: 13, color: c.sub, fontWeight: 600, display: "flex", alignItems: "center", gap: 5 }}>
+                    <FiMapPin size={11} color={ACCENT} /> Delivery fee
+                    {anyEstimated && (
+                      <span style={{ fontSize: 9, fontWeight: 800, padding: "2px 6px", borderRadius: 5, background: "rgba(245,158,11,.15)", color: "#f59e0b", border: "1px solid rgba(245,158,11,.25)" }}>
+                        ~est
+                      </span>
+                    )}
+                  </div>
+                  {deliveryBreakdown && !deliveryLoading && (
+                    <div style={{ fontSize: 10.5, color: c.sub, fontWeight: 600, marginTop: 2 }}>{deliveryBreakdown}</div>
+                  )}
+                </div>
+                <span style={{ fontSize: 13, color: c.txt, fontWeight: 700, flexShrink: 0 }}>
+                  {deliveryLoading
+                    ? <span style={{ display: "inline-block", animation: "vcp-spin .7s linear infinite" }}>⟳</span>
+                    : deliveryFee > 0 ? `₦${deliveryFee.toLocaleString()}` : "—"}
+                </span>
+              </div>
+
+              {/* Total — bold, hash underline on old price if discount */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 0" }}>
+                <span style={{ fontFamily: "'Syne',sans-serif", fontSize: 15, fontWeight: 800, color: c.txt }}>Total</span>
+                <div style={{ textAlign: "right" }}>
+                  {promoApplied && discount > 0 && (
+                    <div style={{ fontSize: 11, color: c.sub, fontWeight: 600, textDecoration: "line-through", marginBottom: 1 }}>
+                      ₦{(subtotal + deliveryFee).toLocaleString()}
+                    </div>
+                  )}
+                  <span style={{ fontFamily: "'Syne',sans-serif", fontSize: 22, fontWeight: 900, color: ACCENT }}>
+                    ₦{total.toLocaleString()}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Featured products */}
+          {featuredProducts.length > 0 && (
+            <>
+              <div className="vcp-feat-label" style={{ color: c.sub }}>
+                <FiStar size={12} color={ACCENT} />
+                <span>More from {vendorDisplayName}</span>
+              </div>
+              <div className="vcp-feat-grid">
+                {loadingProducts
+                  ? [0, 1, 2].map(i => (
+                    <div key={i} className="vcp-feat-card" style={{ background: c.surf, border: `1.5px solid ${c.brd}` }}>
+                      <div className="op-sk" style={{ height: 90, borderRadius: "12px 12px 0 0" }} />
+                      <div style={{ padding: "10px 12px" }}>
+                        <div className="op-sk" style={{ width: "70%", height: 10 }} />
+                        <div className="op-sk" style={{ width: "45%", height: 9, marginTop: 6 }} />
+                      </div>
+                    </div>
+                  ))
+                  : featuredProducts.slice(0, 3).map(p => (
+                    <div key={p.id} className="vcp-feat-card" style={{ background: c.surf, border: `1.5px solid ${c.brd}` }}>
+                      <div className="vcp-feat-img" style={{ background: "rgba(255,107,0,.06)" }}>
+                        {(p.images?.[0] || p.image || p.img)
+                          ? <img src={p.images?.[0] || p.image || p.img} alt={p.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                          : <FiPackage size={22} color={dark ? "#333" : "#ccc"} />}
+                      </div>
+                      <div style={{ padding: "10px 12px" }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: c.txt, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginBottom: 3 }}>
+                          {p.name}
+                        </div>
+                        <div style={{ fontSize: 12, fontWeight: 900, color: ACCENT, marginBottom: 8, fontFamily: "'Syne',sans-serif" }}>
+                          ₦{Number(String(p.price).replace(/[^0-9.]/g, "")).toLocaleString()}
+                        </div>
+                        <button
+                          className={`vcp-feat-add ${addedIds.has(p.id) ? "added" : ""}`}
+                          onClick={() => handleAddFeatured(p)}
+                          style={{ background: addedIds.has(p.id) ? "#10B981" : ACCENT }}
+                        >
+                          {addedIds.has(p.id) ? <FiCheck size={12} /> : <FiPlus size={12} />}
+                          {addedIds.has(p.id) ? "Added!" : "Add"}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+              {featuredProducts.length > 3 && (
+                <button
+                  className="vcp-view-more"
+                  style={{ background: dark ? "rgba(255,107,0,.07)" : "rgba(255,107,0,.05)", border: `1.5px solid rgba(255,107,0,.22)`, color: ACCENT }}
+                  onClick={() => navigate(`/store/${vendorId}`)}
+                >
+                  <MdOutlineStorefront size={15} /> View full store
+                </button>
+              )}
+            </>
+          )}
+
+          <div style={{ height: 20 }} />
+        </div>
+
+        {/* FIX: Sticky "Continue to Pay" bar — always visible while scrolling */}
+        <div className="vcp-sticky-bar" style={{
+          background: dark ? "#0a0a0f" : "#f0f0f8",
+          borderTop: `1.5px solid ${c.brd}`,
+        }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 10, fontWeight: 800, color: c.sub, textTransform: "uppercase", letterSpacing: ".5px", lineHeight: 1 }}>
+              {vendorDisplayName}
+            </div>
+            <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 20, fontWeight: 900, color: ACCENT, lineHeight: 1.1, marginTop: 3 }}>
+              ₦{total.toLocaleString()}
+            </div>
+            {promoApplied && discount > 0 && (
+              <div style={{ fontSize: 10, color: "#22c55e", fontWeight: 700, marginTop: 1 }}>
+                You save ₦{discount.toLocaleString()}!
+              </div>
+            )}
+          </div>
+          <button
+            className="vcp-pay-btn-sticky"
+            disabled={vendorCart.length === 0}
+            onClick={() => setShowPaymentSheet(true)}
+          >
+            <FiZap size={16} />
+            Continue to Pay
+            <FiArrowRight size={16} />
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ADDRESS PICKER PAGE
+// ══════════════════════════════════════════════════════════════════════════════
+function AddressPickerPage({ dark, c, savedAddresses, selectedAddress, onSave, onBack }: {
+  dark: boolean; c: any;
+  savedAddresses: SavedAddress[];
+  selectedAddress: SavedAddress | null;
+  onSave: (addr: SavedAddress) => Promise<void>;
+  onBack: () => void;
+}) {
+  const LABELS: SavedAddress["label"][] = ["Home", "Work", "School", "Church", "Other"];
+  const [step, setStep] = useState<"list" | "add">("list");
+  const [label, setLabel] = useState<SavedAddress["label"]>("Home");
+  const [address, setAddress] = useState("");
+  const [landmark, setLandmark] = useState("");
+  const [isDefault, setIsDefault] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    if (!address.trim()) return;
+    setSaving(true);
+    await onSave({ id: Date.now().toString(), label, address: address.trim(), landmark: landmark.trim() || undefined, isDefault, lat: undefined, lng: undefined });
+    setSaving(false);
+  };
+
+  return (
+    <>
+      <style>{globalStyles(dark, c)}</style>
+      <div style={{ minHeight: "100vh", background: c.bg, color: c.txt, fontFamily: "'DM Sans',sans-serif" }}>
+        <div style={{ background: c.surf, borderBottom: `1px solid ${c.brd}`, padding: "14px 18px", display: "flex", alignItems: "center", gap: 12, position: "sticky", top: 0, zIndex: 20 }}>
+          <button style={{ background: "transparent", border: "none", cursor: "pointer", color: c.txt, display: "flex", alignItems: "center", width: 38, height: 38, borderRadius: 11, justifyContent: "center" }}
+            onClick={step === "add" ? () => setStep("list") : onBack}>
+            <FiArrowLeft size={20} />
+          </button>
+          <span style={{ fontFamily: "'Syne',sans-serif", fontWeight: 800, fontSize: 17, color: c.txt }}>
+            {step === "list" ? "Choose Delivery Address" : "Add New Address"}
+          </span>
+        </div>
+
+        <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12, maxWidth: 560, margin: "0 auto" }}>
+          {step === "list" ? (
+            <>
+              <div className="ap-addr-option" style={{ background: c.surf, border: `1.5px solid ${!selectedAddress ? ACCENT : c.brd}`, boxShadow: !selectedAddress ? `0 0 0 3px rgba(255,107,0,.1)` : "none" }}
+                onClick={() => onSave({ id: "gps", label: "Other", address: "GPS location", isDefault: false })}>
+                <div style={{ width: 42, height: 42, borderRadius: 13, background: "rgba(255,107,0,.1)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <FiNavigation size={18} color={ACCENT} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: c.txt }}>Use current GPS location</div>
+                  <div style={{ fontSize: 11, color: c.sub, fontWeight: 600 }}>Auto-detect where I am</div>
+                </div>
+                {!selectedAddress && <FiCheck size={16} color={ACCENT} />}
+              </div>
+
+              {savedAddresses.map(addr => {
+                const Icon = LABEL_ICONS[addr.label] || FiMapPin;
+                const col = LABEL_COLORS[addr.label] || ACCENT;
+                const isActive = selectedAddress?.id === addr.id;
+                return (
+                  <div key={addr.id} className="ap-addr-option"
+                    style={{ background: c.surf, border: `1.5px solid ${isActive ? ACCENT : c.brd}`, boxShadow: isActive ? `0 0 0 3px rgba(255,107,0,.1)` : "none" }}
+                    onClick={() => onSave(addr)}>
+                    <div style={{ width: 42, height: 42, borderRadius: 13, background: `${col}18`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      <Icon size={18} color={col} />
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
+                        <span style={{ fontSize: 11, fontWeight: 800, color: col, textTransform: "uppercase" }}>{addr.label}</span>
+                        {addr.isDefault && <span style={{ fontSize: 9, fontWeight: 800, padding: "1px 6px", borderRadius: 20, background: `${ACCENT}18`, color: ACCENT }}>Default</span>}
+                      </div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: c.txt, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{addr.address}</div>
+                    </div>
+                    {isActive && <FiCheck size={16} color={ACCENT} />}
+                  </div>
+                );
+              })}
+
+              <button onClick={() => setStep("add")} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: "rgba(255,107,0,.07)", border: `1.5px dashed rgba(255,107,0,.28)`, borderRadius: 16, padding: 15, color: ACCENT, fontFamily: "'DM Sans',sans-serif", fontSize: 14, fontWeight: 700, cursor: "pointer", width: "100%" }}>
+                <FiPlus size={16} /> Add new address
+              </button>
+            </>
+          ) : (
+            <>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {LABELS.map(lb => {
+                  const Icon = LABEL_ICONS[lb] || FiMapPin;
+                  const col = LABEL_COLORS[lb] || ACCENT;
+                  const active = label === lb;
+                  return (
+                    <button key={lb} onClick={() => setLabel(lb)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 20, border: `1.5px solid ${active ? col : c.brd}`, background: active ? `${col}18` : "transparent", color: active ? col : c.sub, fontFamily: "'DM Sans',sans-serif", fontSize: 12, fontWeight: 700, cursor: "pointer", transition: "all .2s" }}>
+                      <Icon size={13} /> {lb}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div>
+                <label style={{ fontSize: 10, fontWeight: 800, color: c.sub, textTransform: "uppercase", letterSpacing: ".6px", display: "block", marginBottom: 6 }}>Street Address</label>
+                <div style={{ display: "flex", alignItems: "center", gap: 9, background: c.inp, border: `1.5px solid ${c.inpB}`, borderRadius: 13, padding: "11px 14px" }}>
+                  <FiMapPin size={14} color={c.sub} />
+                  <input style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: c.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13, fontWeight: 600 }}
+                    placeholder="e.g. 12 Adeola Odeku Street, VI" value={address} onChange={e => setAddress(e.target.value)} />
+                </div>
+              </div>
+
+              <div>
+                <label style={{ fontSize: 10, fontWeight: 800, color: c.sub, textTransform: "uppercase", letterSpacing: ".6px", display: "block", marginBottom: 6 }}>Nearest Landmark <span style={{ fontWeight: 600, textTransform: "none" }}>(optional)</span></label>
+                <div style={{ display: "flex", alignItems: "center", gap: 9, background: c.inp, border: `1.5px solid ${c.inpB}`, borderRadius: 13, padding: "11px 14px" }}>
+                  <FiAlertCircle size={14} color={c.sub} />
+                  <input style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: c.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13, fontWeight: 600 }}
+                    placeholder="e.g. Opposite First Bank" value={landmark} onChange={e => setLandmark(e.target.value)} />
+                </div>
+              </div>
+
+              <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+                <div onClick={() => setIsDefault(v => !v)} style={{ width: 21, height: 21, borderRadius: 6, border: `2px solid ${isDefault ? ACCENT : c.dim}`, background: isDefault ? "rgba(255,107,0,.14)" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  {isDefault && <FiCheck size={13} color={ACCENT} />}
+                </div>
+                <span style={{ fontSize: 13, fontWeight: 600, color: c.txt }}>Set as default address</span>
+              </label>
+
+              <button onClick={handleSave} disabled={!address.trim() || saving}
+                style={{ background: `linear-gradient(135deg,${ACCENT},${ACCENT2})`, color: "white", border: "none", borderRadius: 14, padding: 16, fontFamily: "'Syne',sans-serif", fontSize: 15, fontWeight: 800, cursor: address.trim() && !saving ? "pointer" : "not-allowed", opacity: address.trim() && !saving ? 1 : .5, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, boxShadow: "0 6px 22px rgba(255,107,0,.3)" }}>
+                {saving ? <><span className="mini-spin" /> Saving...</> : <><FiCheck size={16} /> Save &amp; Use This Address</>}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PAYMENT PAGE
+// FIX: Accepts discount + deliveryFee from parent (already computed)
+// ══════════════════════════════════════════════════════════════════════════════
+function PaymentPage({ dark, c, vendorCart, subtotal, discount, deliveryFee, selectedAddress, vendorId, vendorName, onBack, onSuccess }: {
+  dark: boolean; c: any; vendorCart: any[]; subtotal: number;
+  discount: number; deliveryFee: number;
+  selectedAddress: SavedAddress | null;
+  vendorId: string; vendorName: string;
+  onBack: () => void;
+  onSuccess: (orderId: string) => void;
+}) {
+  const [method, setMethod] = useState<"bank" | "card" | null>(null);
+  const [processing, setProcessing] = useState(false);
+  const [cardName, setCardName] = useState("");
+  const [cardNum, setCardNum] = useState("");
+  const [cardExp, setCardExp] = useState("");
+  const [cardCvv, setCardCvv] = useState("");
+  const [saveCard, setSaveCard] = useState(false);
+  const [showCvv, setShowCvv] = useState(false);
+
+  const total = subtotal - discount + deliveryFee;
+
+  const fmtCard = (v: string) => v.replace(/\D/g, "").replace(/(.{4})/g, "$1 ").trim().slice(0, 19);
+  const fmtExp = (v: string) => { const d = v.replace(/\D/g, "").slice(0, 4); return d.length > 2 ? `${d.slice(0, 2)}/${d.slice(2)}` : d; };
+
+  const openPaystack = async () => {
+    setProcessing(true);
     try {
+      const uid = auth.currentUser?.uid;
+      if (!uid) { alert("Please log in"); setProcessing(false); return; }
+      let email = auth.currentUser?.email ?? "";
+      if (!email) { const snap = await getDoc(doc(db, "users", uid)); email = (snap.data()?.email as string) ?? ""; }
+
       if (!window.PaystackPop) {
-        await new Promise<void>((resolve, reject) => {
-          const existing = document.getElementById("paystack-js");
-          if (existing) { resolve(); return; }
+        await new Promise<void>((res, rej) => {
+          if (document.getElementById("paystack-js")) { res(); return; }
           const s = document.createElement("script");
           s.id = "paystack-js"; s.src = "https://js.paystack.co/v1/inline.js";
-          s.onload = () => resolve();
-          s.onerror = () => reject(new Error("Paystack script failed to load"));
+          s.onload = () => res(); s.onerror = () => rej(new Error("Paystack load failed"));
           document.head.appendChild(s);
         });
         await new Promise(r => setTimeout(r, 200));
       }
-      if (!window.PaystackPop) { alert("Paystack could not load. Please check your internet connection."); return; }
-      let email = auth.currentUser?.email ?? "";
-      if (!email && auth.currentUser?.uid) {
-        const snap = await getDoc(doc(db, "users", auth.currentUser.uid));
-        email = (snap.data()?.email as string) ?? "";
+
+      let subaccount: string | undefined;
+      if (vendorId) {
+        try { const vs = await getDoc(doc(db, "vendors", vendorId)); subaccount = vs.data()?.bankAccount?.subaccount_code; } catch {}
       }
-      if (!email) { alert("Please log in to checkout."); return; }
-      let subaccountCode: string | undefined;
-      const firstVendorName = cart[0]?.vendorName;
-      if (firstVendorName) {
-        try {
-          for (const field of ["businessName", "storeName", "displayName", "name"]) {
-            const snap = await getDocs(query(collection(db, "vendors"), where(field, "==", firstVendorName), limit(1)));
-            if (!snap.empty) { subaccountCode = snap.docs[0].data()?.bankAccount?.subaccount_code; break; }
-          }
-        } catch { /* subaccount optional */ }
-      }
-      const reference         = `SWIFT_${Date.now()}_${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
-      const customerPickupCode = Math.random().toString(36).slice(2, 8).toUpperCase(); // ← NEW
-      const deliveryAddr      = selectedAddress?.address ?? "GPS location";
+
+      const orderId = `SWIFT_${Date.now()}_${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+      const customerPickupCode = Math.random().toString(36).slice(2, 8).toUpperCase();
+      const userSnap = await getDoc(doc(db, "users", uid));
+      const userData = userSnap.data();
+
+      await setDoc(doc(db, "orders", orderId), {
+        orderId, userId: uid,
+        customerName: userData?.fullName || auth.currentUser?.displayName || "Customer",
+        customerEmail: email, customerPhone: userData?.phone || "",
+        vendorId, vendorName,
+        items: vendorCart.map(i => ({ name: i.name, qty: i.qty, price: parsePrice(i.price), img: i.img || "", vendorName: i.vendorName || "", vendorId: i.vendorId || "" })),
+        subtotal, deliveryFee, discount, total,
+        deliveryAddress: selectedAddress?.address || "GPS location",
+        deliveryLabel: selectedAddress?.label || "GPS",
+        paymentMethod: "paystack", customerPickupCode,
+        paymentStatus: "pending", status: "pending",
+        createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+      });
+
+      const initFn = httpsCallable(fbFunctions, "paystackInitializeOrderPayment");
+      const initRes = await initFn({ orderId, amountKobo: total * 100, vendorSubaccountCode: subaccount }) as any;
+
       window.PaystackPop.setup({
-        key: PAYSTACK_PUBLIC_KEY, email, amount: total * 100, currency: "NGN", ref: reference,
-        ...(subaccountCode ? { subaccount: subaccountCode } : {}),
-        metadata: {
-          cart_items:       cart.map(i => `${i.qty}x ${i.name} (${i.vendorName ?? ""})`).join(", "),
-          delivery_address: deliveryAddr,
-          delivery_label:   selectedAddress?.label ?? "GPS",
-        },
-        onSuccess: (t) => {
-          void (async () => {
-            const uid = auth.currentUser?.uid;
-            if (uid) {
-              try {
-                const orderId  = t.reference;
-                const userSnap = await getDoc(doc(db, "users", uid));
-                const userData = userSnap.data();
-                await setDoc(doc(db, "orders", orderId), {
-                  orderId, userId: uid,
-                  customerName:  userData?.fullName || auth.currentUser?.displayName || "Customer",
-                  customerEmail: userData?.email    || auth.currentUser?.email        || "",
-                  customerPhone: userData?.phone    || "",
-                  vendorId:   cart[0]?.vendorId   || "",
-                  vendorName: cart[0]?.vendorName || "",
-                  items: cart.map(i => ({ name: i.name, qty: i.qty, price: parsePrice(i.price), img: i.img || "", vendorName: i.vendorName || "", vendorId: i.vendorId || "" })),
-                  subtotal, deliveryFee, discount, total,
-                  deliveryAddress: selectedAddress?.address || "GPS location",
-                  deliveryLabel:   selectedAddress?.label   || "GPS",
-                  paymentMethod: "paystack",
-                  paystackReference: t.reference,
-                  customerPickupCode, // ← NEW
-                  status: "confirmed",
-                  createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
-                });
-                clearCart();
-                setCheckoutLoading(false);
-                navigate(`/orders/${orderId}/track`);
-              } catch (err) {
-                console.error("[Paystack] Failed to save order:", err);
-                setPaySuccess(true);
-                clearCart();
-                setCheckoutLoading(false);
-              }
-            }
-          })();
-        },
-        onCancel: () => { setCheckoutLoading(false); },
+        key: PAYSTACK_PUBLIC_KEY, email, amount: total * 100, currency: "NGN",
+        ref: initRes.data.reference,
+        metadata: { orderId, delivery_address: selectedAddress?.address ?? "GPS" },
+        onSuccess: () => { setProcessing(false); onSuccess(orderId); },
+        onCancel: () => setProcessing(false),
       }).openIframe();
-    } catch (err: any) {
-      console.error("[Paystack]", err);
-      alert("Payment failed: " + (err?.message || String(err)));
-      setCheckoutLoading(false);
+    } catch (e: any) {
+      alert("Payment error: " + (e?.message || String(e)));
+      setProcessing(false);
     }
   };
 
   return (
     <>
-      <style>{`
-        @keyframes cp-in    { from{opacity:0;transform:translateY(18px)} to{opacity:1;transform:translateY(0)} }
-        @keyframes cp-pop   { 0%{transform:scale(1)} 45%{transform:scale(1.22)} 100%{transform:scale(1)} }
-        @keyframes cp-pulse { 0%,100%{box-shadow:0 0 0 0 rgba(255,107,0,0.4)} 50%{box-shadow:0 0 0 8px rgba(255,107,0,0)} }
-        @keyframes cp-spin  { to{transform:rotate(360deg)} }
-        @keyframes cp-dropdown-in { from{opacity:0;transform:translateY(-8px) scale(.97)} to{opacity:1;transform:translateY(0) scale(1)} }
-        @keyframes cp-fade-in  { from{opacity:0} to{opacity:1} }
-        @keyframes cp-modal-in { from{opacity:0;transform:scale(.9) translateY(20px)} to{opacity:1;transform:scale(1) translateY(0)} }
+      <style>{globalStyles(dark, c)}</style>
+      <div style={{ minHeight: "100vh", background: c.bg, color: c.txt, fontFamily: "'DM Sans',sans-serif" }}>
 
-        .cp { min-height:100vh; font-family:'DM Sans',sans-serif; padding:24px 16px 220px; transition:background .3s,color .3s; }
-        .cp-in { max-width:660px; margin:0 auto; }
-        .cp-head { display:flex; align-items:center; gap:12px; margin-bottom:32px; animation:cp-in .35s ease both; }
-        .cp-accent-bar { width:5px; height:44px; border-radius:4px; background:linear-gradient(180deg,${ACCENT},#FF9A00); flex-shrink:0; }
-        .cp-title { font-family:'Syne',sans-serif; font-size:clamp(28px,6vw,38px); font-weight:900; letter-spacing:-1.5px; line-height:1; }
-        .cp-badge { margin-left:auto; background:${ACCENT}; color:#fff; border-radius:20px; padding:5px 16px; font-family:'Syne',sans-serif; font-size:13px; font-weight:800; }
-        .cp-empty { display:flex; flex-direction:column; align-items:center; padding:80px 20px; gap:20px; text-align:center; animation:cp-in .4s ease both; }
-        .cp-empty-ring { width:96px; height:96px; border-radius:32px; border:2px dashed rgba(255,107,0,0.3); background:rgba(255,107,0,0.06); display:flex; align-items:center; justify-content:center; animation:cp-pulse 2.4s infinite; }
-        .cp-empty-title { font-family:'Syne',sans-serif; font-size:24px; font-weight:800; }
-        .cp-success { display:flex; flex-direction:column; align-items:center; padding:80px 20px; gap:16px; text-align:center; animation:cp-in .4s ease both; }
-        .cp-success-ring { width:100px; height:100px; border-radius:50%; background:rgba(34,197,94,0.12); border:2px solid #22c55e; display:flex; align-items:center; justify-content:center; }
-        .cp-deliver-section { margin-bottom:20px; animation:cp-in .3s ease both; animation-delay:.05s; position:relative; z-index:100; }
-        .cp-deliver-label { display:flex; align-items:center; gap:6px; font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:.8px; margin-bottom:10px; }
-        .cp-deliver-hint { font-size:11px; font-weight:600; margin-top:7px; display:flex; align-items:center; gap:5px; }
-        .cp-list { display:flex; flex-direction:column; gap:10px; margin-bottom:20px; }
-        .cp-card { display:flex; align-items:stretch; border-radius:20px; overflow:hidden; border:1.5px solid; transition:border-color .2s,box-shadow .2s,transform .18s; animation:cp-in .3s ease both; position:relative; }
-        .cp-card:hover { transform:translateY(-2px); border-color:${ACCENT} !important; box-shadow:0 8px 28px rgba(255,107,0,0.14); }
-        .cp-thumb { width:90px; min-width:90px; flex-shrink:0; overflow:hidden; display:flex; align-items:center; justify-content:center; pointer-events:none; }
-        .cp-thumb img { width:100%; height:100%; object-fit:cover; display:block; }
-        .cp-body { flex:1; padding:14px 15px; min-width:0; display:flex; flex-direction:column; gap:9px; }
-        .cp-name { font-family:'Syne',sans-serif; font-size:14px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-        .cp-vendor { display:flex; align-items:center; gap:4px; font-size:11px; font-weight:600; }
-        .cp-row { display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; }
-        .cp-price { font-family:'Syne',sans-serif; font-size:16px; font-weight:900; color:${ACCENT}; }
-        .cp-qty { display:flex; align-items:center; gap:2px; background:rgba(255,107,0,0.09); border-radius:12px; padding:2px 3px; border:1px solid rgba(255,107,0,0.15); }
-        .cp-qbtn { width:30px; height:30px; border-radius:10px; border:none; background:transparent; display:flex; align-items:center; justify-content:center; cursor:pointer; transition:background .15s; color:${ACCENT}; position:relative; z-index:2; -webkit-tap-highlight-color:transparent; touch-action:manipulation; }
-        .cp-qbtn:hover{background:rgba(255,107,0,0.2)} .cp-qbtn:active{background:rgba(255,107,0,0.35);transform:scale(0.92)}
-        .cp-qnum { font-family:'Syne',sans-serif; font-size:15px; font-weight:800; color:${ACCENT}; min-width:24px; text-align:center; }
-        .cp-del { background:none; border:none; cursor:pointer; padding:6px; border-radius:9px; display:flex; align-items:center; transition:background .15s; position:relative; z-index:2; -webkit-tap-highlight-color:transparent; touch-action:manipulation; }
-        .cp-del:hover{background:rgba(239,68,68,0.12)} .cp-del:active{transform:scale(0.88);background:rgba(239,68,68,0.2)}
-        .cp-summary { border-radius:24px; border:1.5px solid; padding:24px 22px; display:flex; flex-direction:column; gap:16px; animation:cp-in .45s ease both; }
-        .cp-section-label { font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:.8px; display:flex; align-items:center; gap:6px; margin-bottom:8px; }
-        .cp-promo-row { display:flex; gap:8px; }
-        .cp-promo-inp { flex:1; border-radius:13px; border:1.5px solid; padding:11px 15px; font-family:'DM Sans',sans-serif; font-size:13px; font-weight:600; outline:none; transition:border-color .2s,box-shadow .2s; }
-        .cp-promo-inp:focus{border-color:${ACCENT};box-shadow:0 0 0 3px rgba(255,107,0,0.1)} .cp-promo-inp::placeholder{opacity:.5}
-        .cp-promo-btn { background:${ACCENT}; color:#fff; border:none; border-radius:13px; padding:11px 20px; font-family:'DM Sans',sans-serif; font-size:13px; font-weight:700; cursor:pointer; transition:opacity .15s,transform .15s; }
-        .cp-promo-btn:hover{opacity:.88;transform:translateY(-1px)}
-        .cp-row-item { display:flex; align-items:flex-start; justify-content:space-between; font-size:13px; padding:3px 0; gap:8px; }
-        .cp-divider { height:1px; border:none; margin:4px 0; }
-        .cp-delivery-hint { font-size:10.5px; font-weight:600; margin-top:2px; opacity:.75; line-height:1.5; }
-        .cp-approx-badge { display:inline-block; font-size:9px; font-weight:800; padding:2px 7px; border-radius:5px; background:rgba(245,158,11,0.15); color:#f59e0b; border:1px solid rgba(245,158,11,0.25); margin-left:6px; vertical-align:middle; }
-        .cp-spin-el { display:inline-block; animation:cp-spin .7s linear infinite; }
-        .cp-cta { width:100%; background:linear-gradient(135deg,${ACCENT},#FF9A00); color:#fff; border:none; border-radius:18px; padding:17px 24px; font-family:'Syne',sans-serif; font-size:16px; font-weight:900; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:10px; box-shadow:0 8px 32px rgba(255,107,0,0.32); transition:transform .2s,box-shadow .2s; touch-action:manipulation; -webkit-tap-highlight-color:transparent; }
-        .cp-cta:hover:not(:disabled){transform:translateY(-3px);box-shadow:0 16px 40px rgba(255,107,0,0.44)} .cp-cta:active:not(:disabled){transform:translateY(0)} .cp-cta:disabled{opacity:.45;cursor:not-allowed}
-        .cp-secure { display:flex; align-items:center; justify-content:center; gap:6px; font-size:11px; font-weight:600; margin-top:2px; }
-        @media(min-width:600px){.cp{padding:28px 24px 220px}} @media(min-width:1024px){.cp{padding:36px 48px 220px}}
-      `}</style>
+        <div style={{ background: c.surf, borderBottom: `1px solid ${c.brd}`, padding: "14px 18px", display: "flex", alignItems: "center", gap: 12, position: "sticky", top: 0, zIndex: 20 }}>
+          <button onClick={onBack} style={{ background: "transparent", border: "none", cursor: "pointer", color: c.txt, display: "flex", alignItems: "center" }}>
+            <FiArrowLeft size={20} />
+          </button>
+          <span style={{ fontFamily: "'Syne',sans-serif", fontWeight: 800, fontSize: 17, color: c.txt }}>Checkout</span>
+          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 700, color: "#10B981" }}>
+            <FiLock size={12} /> Secure
+          </div>
+        </div>
 
-      <div className="cp" style={{ background: c.bg, color: c.txt }}>
-        <div className="cp-in">
+        <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 14, maxWidth: 560, margin: "0 auto" }}>
 
-          <div className="cp-head">
-            <div className="cp-accent-bar" />
-            <h1 className="cp-title" style={{ color: c.txt }}>My Cart</h1>
-            {cartCount > 0 && <div className="cp-badge">{cartCount} item{cartCount !== 1 ? "s" : ""}</div>}
+          {/* Order summary */}
+          <div style={{ background: c.surf, border: `1.5px solid ${c.brd}`, borderRadius: 20, overflow: "hidden" }}>
+            <div style={{ padding: "13px 18px", borderBottom: `1px solid ${c.brd}` }}>
+              <span style={{ fontSize: 11, fontWeight: 800, color: c.sub, textTransform: "uppercase", letterSpacing: ".7px" }}>Order Summary</span>
+            </div>
+            <div style={{ padding: "0 18px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", borderBottom: `1px solid ${c.brd}`, fontSize: 13, color: c.sub, fontWeight: 600 }}>
+                <span>Subtotal ({vendorCart.reduce((s, i) => s + i.qty, 0)} items)</span>
+                <span style={{ color: c.txt, fontWeight: 700 }}>₦{subtotal.toLocaleString()}</span>
+              </div>
+              {discount > 0 && (
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", borderBottom: `1px solid ${c.brd}`, fontSize: 13, color: "#22c55e", fontWeight: 600 }}>
+                  <span>Discount</span>
+                  <span style={{ fontWeight: 700 }}>−₦{discount.toLocaleString()}</span>
+                </div>
+              )}
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", borderBottom: `1px solid ${c.brd}`, fontSize: 13, color: c.sub, fontWeight: 600 }}>
+                <span>Delivery fee</span>
+                <span style={{ color: c.txt, fontWeight: 700 }}>₦{deliveryFee.toLocaleString()}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "13px 0" }}>
+                <span style={{ fontFamily: "'Syne',sans-serif", fontSize: 15, fontWeight: 800, color: c.txt }}>Total</span>
+                <span style={{ fontFamily: "'Syne',sans-serif", fontSize: 24, fontWeight: 900, color: ACCENT }}>₦{total.toLocaleString()}</span>
+              </div>
+            </div>
           </div>
 
-          {showPaymentModal && (
-            <PaymentMethodModal total={total} walletBalance={walletBalance} walletLoading={walletLoading}
-              onPaystack={handlePaystack} onWallet={handleWalletPay}
-              onClose={() => setShowPaymentModal(false)} dark={dark} c={c} />
-          )}
+          <div style={{ fontSize: 11, fontWeight: 800, color: c.sub, textTransform: "uppercase", letterSpacing: ".8px", paddingLeft: 2 }}>Choose payment method</div>
 
-          {paySuccess && (
-            <div className="cp-success">
-              <div className="cp-success-ring"><FiCheckCircle size={48} color="#22c55e" /></div>
-              <div style={{ fontFamily: "Syne,sans-serif", fontSize: 28, fontWeight: 900, color: "#22c55e" }}>Order Placed! 🎉</div>
-              <p style={{ color: c.sub, fontSize: 14, lineHeight: 1.7, maxWidth: 280, textAlign: "center" }}>
-                Payment successful. Your order is being processed and a rider will pick it up soon.
-              </p>
+          {/* Bank Transfer */}
+          <div className="pay-method"
+            style={{ background: c.surf, border: `1.5px solid ${method === "bank" ? ACCENT : c.brd}`, borderRadius: 18, padding: 16, cursor: "pointer", boxShadow: method === "bank" ? `0 0 0 3px rgba(255,107,0,.1)` : "none", transition: "all .2s" }}
+            onClick={() => setMethod("bank")}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <div style={{ width: 46, height: 46, borderRadius: 14, background: method === "bank" ? "rgba(255,107,0,.11)" : c.inp, display: "flex", alignItems: "center", justifyContent: "center", transition: "background .2s" }}>
+                <RiBankCardLine size={22} color={method === "bank" ? ACCENT : c.sub} />
+              </div>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 14, color: c.txt }}>Bank Transfer</div>
+                <div style={{ fontWeight: 600, fontSize: 11, color: c.sub }}>Pay directly from your bank</div>
+              </div>
+              <div className="pay-radio" style={{ marginLeft: "auto", borderColor: method === "bank" ? ACCENT : c.dim }}>
+                {method === "bank" && <div className="pay-radio-dot" />}
+              </div>
             </div>
-          )}
+          </div>
 
-          {!paySuccess && cart.length === 0 && (
-            <div className="cp-empty">
-              <div className="cp-empty-ring"><FiShoppingCart size={38} color={ACCENT} /></div>
-              <div className="cp-empty-title" style={{ color: c.txt }}>Your cart is empty</div>
-              <p style={{ color: c.sub, fontSize: 14, lineHeight: 1.7, maxWidth: 260 }}>
-                Browse products and tap <strong style={{ color: ACCENT }}>Add</strong> or{" "}
-                <strong style={{ color: ACCENT }}>Buy</strong> to add items here.
-              </p>
+          {/* Card */}
+          <div className="pay-method"
+            style={{ background: c.surf, border: `1.5px solid ${method === "card" ? ACCENT : c.brd}`, borderRadius: 18, overflow: "hidden", cursor: "pointer", boxShadow: method === "card" ? `0 0 0 3px rgba(255,107,0,.1)` : "none", transition: "all .2s" }}
+            onClick={() => setMethod("card")}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, padding: 16 }}>
+              <div style={{ width: 46, height: 46, borderRadius: 14, background: method === "card" ? "rgba(255,107,0,.11)" : c.inp, display: "flex", alignItems: "center", justifyContent: "center", transition: "background .2s" }}>
+                <FiCreditCard size={20} color={method === "card" ? ACCENT : c.sub} />
+              </div>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 14, color: c.txt }}>Debit / Credit Card</div>
+                <div style={{ fontWeight: 600, fontSize: 11, color: c.sub }}>Visa · Mastercard · Verve</div>
+              </div>
+              <div className="pay-radio" style={{ marginLeft: "auto", borderColor: method === "card" ? ACCENT : c.dim }}>
+                {method === "card" && <div className="pay-radio-dot" />}
+              </div>
             </div>
+
+            {method === "card" && (
+              <div style={{ padding: "0 16px 16px", borderTop: `1px solid ${c.brd}`, display: "flex", flexDirection: "column", gap: 10 }} onClick={e => e.stopPropagation()}>
+                <CardField label="Cardholder Name" placeholder="John Doe" value={cardName} onChange={setCardName} c={c} icon={<FiShield size={14} color={c.sub} />} />
+                <CardField label="Card Number" placeholder="0000 0000 0000 0000" value={cardNum} onChange={(v: string) => setCardNum(fmtCard(v))} c={c} icon={<FiCreditCard size={14} color={c.sub} />} maxLength={19} inputMode="numeric" />
+                <div style={{ display: "flex", gap: 10 }}>
+                  <div style={{ flex: 1 }}>
+                    <CardField label="Expiry" placeholder="MM/YY" value={cardExp} onChange={(v: string) => setCardExp(fmtExp(v))} c={c} maxLength={5} inputMode="numeric" />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <CardField label="CVV" placeholder="•••" value={cardCvv} onChange={(v: string) => setCardCvv(v.replace(/\D/g, "").slice(0, 4))} c={c} maxLength={4} isSecret={!showCvv} inputMode="numeric"
+                      suffix={<button onClick={() => setShowCvv(v => !v)} style={{ background: "none", border: "none", cursor: "pointer", color: c.sub, display: "flex", padding: 0 }}>
+                        {showCvv ? <FiEyeOff size={14} /> : <FiEye size={14} />}
+                      </button>} />
+                  </div>
+                </div>
+                <label style={{ display: "flex", alignItems: "center", gap: 9, cursor: "pointer" }}>
+                  <div onClick={() => setSaveCard(v => !v)} style={{ width: 20, height: 20, borderRadius: 6, border: `2px solid ${saveCard ? ACCENT : c.dim}`, background: saveCard ? "rgba(255,107,0,.12)" : "transparent", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    {saveCard && <FiCheck size={12} color={ACCENT} />}
+                  </div>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: c.sub }}>Save card for future payments</span>
+                </label>
+              </div>
+            )}
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, color: c.sub, fontSize: 11, fontWeight: 600 }}>
+            <FiShield size={12} color={ACCENT} /> Secured by Paystack · End-to-end encrypted
+          </div>
+
+          {method && (
+            <button onClick={openPaystack} disabled={processing}
+              style={{ background: `linear-gradient(135deg,${ACCENT},${ACCENT2})`, color: "white", border: "none", borderRadius: 18, padding: "17px 24px", fontFamily: "'Syne',sans-serif", fontSize: 16, fontWeight: 900, cursor: processing ? "not-allowed" : "pointer", opacity: processing ? .7 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 10, boxShadow: "0 8px 28px rgba(255,107,0,.35)", transition: "transform .2s,box-shadow .2s", width: "100%" }}>
+              {processing ? <><span className="mini-spin" /> Processing...</> : <><FiZap size={18} /> Pay ₦{total.toLocaleString()} Now <FiArrowRight size={18} /></>}
+            </button>
           )}
 
-          {!paySuccess && cart.length > 0 && (
-            <>
-              <div className="cp-deliver-section">
-                <div className="cp-deliver-label" style={{ color: c.sub }}>
-                  <FiMapPin size={12} color={ACCENT} />
-                  <span style={{ color: c.txt }}>Deliver to</span>
-                </div>
-                <AddressPicker addresses={savedAddresses} selected={selectedAddress}
-                  onSelect={addr => { setSelectedAddress(addr); lastCartSig.current = ""; }}
-                  loading={addressesLoading} dark={dark} c={c} />
-                {!selectedAddress && !addressesLoading && (
-                  <div className="cp-deliver-hint" style={{ color: c.sub }}>
-                    <FiNavigation size={11} color={ACCENT} />
-                    Using your <strong style={{ color: c.txt }}>current GPS location</strong>.
-                    {savedAddresses.length > 0 ? " Pick a saved address above for a more accurate fee." : " Save addresses in your profile for faster checkout."}
-                  </div>
-                )}
-                {selectedAddress && !selectedAddress.lat && !addressesLoading && (
-                  <div className="cp-deliver-hint" style={{ color: "#f59e0b" }}>⚠ This address has no exact pin — fee is estimated from the text address.</div>
-                )}
-                {selectedAddress?.lat && (
-                  <div className="cp-deliver-hint" style={{ color: "#10B981" }}>✓ Exact coordinates on file — delivery fee is precise.</div>
-                )}
-              </div>
-
-              <div className="cp-list">
-                {cart.map((item, i) => (
-                  <div key={item.name} className="cp-card" style={{ background: c.surf, borderColor: c.brd, animationDelay: `${i * 0.05}s` }}>
-                    <div className="cp-thumb" style={{ background: "rgba(255,107,0,0.07)", minHeight: 92 }}>
-                      {item.img ? <img src={item.img} alt={item.name} />
-                        : <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, color: dark ? "#333" : "#ccc" }}>
-                            <FiPackage size={26} />
-                            <span style={{ fontSize: 8, fontWeight: 700, textTransform: "uppercase" }}>No img</span>
-                          </div>}
-                    </div>
-                    <div className="cp-body">
-                      <div>
-                        <div className="cp-name" style={{ color: c.txt }}>{item.name}</div>
-                        {item.vendorName && (
-                          <div className="cp-vendor" style={{ color: c.sub }}>
-                            {item.vendorName}
-                            {item.vendorVerified && <RiVerifiedBadgeFill size={11} color="#3b82f6" />}
-                          </div>
-                        )}
-                      </div>
-                      <div className="cp-row">
-                        <span className="cp-price">{item.price}</span>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <div className="cp-qty">
-                            <button className="cp-qbtn" type="button" onPointerDown={e => { e.stopPropagation(); removeOne(item.name); }}><FiMinus size={13} /></button>
-                            <span className="cp-qnum">{item.qty}</span>
-                            <button className="cp-qbtn" type="button" onPointerDown={e => { e.stopPropagation(); addToCart({ name: item.name, price: item.price, img: item.img, vendorName: item.vendorName, vendorVerified: item.vendorVerified, vendorLat: item.vendorLat, vendorLng: item.vendorLng }); }}><FiPlus size={13} /></button>
-                          </div>
-                          <button className="cp-del" type="button" style={{ color: c.dim }} onPointerDown={e => { e.stopPropagation(); clearItem(item.name); }}><FiTrash2 size={15} /></button>
-                        </div>
-                      </div>
-                      <div style={{ fontSize: 11, fontWeight: 600, color: c.sub }}>
-                        Line total: <span style={{ color: c.txt, fontWeight: 700 }}>₦{(parsePrice(item.price) * item.qty).toLocaleString()}</span>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="cp-summary" style={{ background: c.surf, borderColor: c.brd }}>
-                <div>
-                  <div className="cp-section-label" style={{ color: c.sub }}><FiTag size={12} color={ACCENT} /> Promo Code</div>
-                  <div className="cp-promo-row">
-                    <input className="cp-promo-inp"
-                      style={{ background: c.inp, borderColor: promoApplied ? "#22c55e" : c.inpB, color: c.txt }}
-                      placeholder="Try SWIFT10 for 10% off"
-                      value={promoCode}
-                      onChange={e => { setPromoCode(e.target.value); setPromoErr(""); setPromoApplied(false); setPromoData(null); }}
-                      disabled={promoApplied} />
-                    {promoApplied
-                      ? <div style={{ display: "flex", alignItems: "center", gap: 6, color: "#22c55e", fontWeight: 700, fontSize: 13, padding: "0 10px" }}><FiCheckCircle size={16} /> Applied!</div>
-                      : <button className="cp-promo-btn" onClick={handlePromo}>Apply</button>}
-                  </div>
-                  {promoErr && <div style={{ fontSize: 11, color: "#ef4444", fontWeight: 700, marginTop: 7 }}>✕ {promoErr}</div>}
-                </div>
-
-                <hr className="cp-divider" style={{ background: c.brd }} />
-
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  <div className="cp-row-item">
-                    <span style={{ color: c.sub, fontWeight: 600 }}>Subtotal ({cartCount} item{cartCount !== 1 ? "s" : ""})</span>
-                    <span style={{ color: c.txt, fontWeight: 700 }}>₦{subtotal.toLocaleString()}</span>
-                  </div>
-                  {promoApplied && (
-                    <div className="cp-row-item">
-                      <span style={{ color: "#22c55e", fontWeight: 600 }}>Discount ({promoData?.type === "percentage" ? `${promoData.value}%` : "fixed"})</span>
-                      <span style={{ color: "#22c55e", fontWeight: 700 }}>−₦{discount.toLocaleString()}</span>
-                    </div>
-                  )}
-                  <div className="cp-row-item">
-                    <div>
-                      <div style={{ color: c.sub, fontWeight: 600, display: "flex", alignItems: "center", gap: 5 }}>
-                        <FiMapPin size={12} color={ACCENT} /> Delivery fee
-                        {anyEstimated && <span className="cp-approx-badge">~ estimated</span>}
-                      </div>
-                      {deliveryBreakdown && !deliveryLoading && <div className="cp-delivery-hint" style={{ color: c.sub }}>{deliveryBreakdown}</div>}
-                    </div>
-                    <span style={{ color: c.txt, fontWeight: 700, flexShrink: 0 }}>
-                      {deliveryLoading ? <span className="cp-spin-el">⟳</span> : deliveryFee > 0 ? `₦${deliveryFee.toLocaleString()}` : "—"}
-                    </span>
-                  </div>
-                  <hr className="cp-divider" style={{ background: c.brd }} />
-                  <div className="cp-row-item">
-                    <span style={{ fontFamily: "Syne,sans-serif", fontSize: 16, fontWeight: 800, color: c.txt }}>Total</span>
-                    <span style={{ fontFamily: "Syne,sans-serif", fontSize: 22, fontWeight: 900, color: ACCENT }}>₦{total.toLocaleString()}</span>
-                  </div>
-                </div>
-
-                <button className="cp-cta" onClick={handleCheckoutClick}
-                  disabled={checkoutLoading || deliveryLoading || cart.length === 0}>
-                  {checkoutLoading
-                    ? <><span className="cp-spin-el">⟳</span> Processing...</>
-                    : <><FiZap size={18} /> Proceed to Checkout <FiArrowRight size={18} /></>}
-                </button>
-
-                <div className="cp-secure" style={{ color: c.dim }}>
-                  <FiShield size={12} /> Secured by Paystack · End-to-end encrypted
-                </div>
-              </div>
-            </>
-          )}
-
-          <div style={{ height: 80 }} />
+          <div style={{ height: 50 }} />
         </div>
       </div>
-
-      {pendingOrderId && (
-        <PendingOrderBanner orderId={pendingOrderId} status={pendingOrderStatus}
-          onTrack={() => navigate(`/orders/${pendingOrderId}/track`)} />
-      )}
     </>
   );
+}
+
+// ── Card field helper ─────────────────────────────────────────────────────────
+interface CardFieldProps {
+  label: string;
+  placeholder: string;
+  value: string;
+  onChange: (v: string) => void;
+  c: Record<string, string>;
+  icon?: React.ReactNode;
+  suffix?: React.ReactNode;
+  maxLength?: number;
+  isSecret?: boolean;
+  inputMode?: React.HTMLAttributes<HTMLInputElement>["inputMode"];
+}
+
+function CardField({ label, placeholder, value, onChange, c, icon, maxLength, isSecret, inputMode, suffix }: CardFieldProps) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <label style={{ fontSize: 10, fontWeight: 800, color: c.sub, textTransform: "uppercase", letterSpacing: ".6px" }}>{label}</label>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, background: c.inp, border: `1.5px solid ${c.inpB}`, borderRadius: 12, padding: "10px 13px" }}>
+        {icon}
+        <input
+          type={isSecret ? "password" : "text"}
+          inputMode={inputMode || "text"}
+          style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: c.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13, fontWeight: 600 }}
+          placeholder={placeholder}
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          maxLength={maxLength}
+        />
+        {suffix}
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// GLOBAL STYLES
+// ══════════════════════════════════════════════════════════════════════════════
+function globalStyles(dark: boolean, c: any) {
+  const sk = dark ? "#1c1c2a" : "#e8e8f4";
+  const sk2 = dark ? "#252538" : "#f0f0fa";
+  return `
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800;900&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;0,9..40,800;1,9..40,400&display=swap');
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+button{font-family:'DM Sans',sans-serif;}
+
+.op-root{min-height:100vh;font-family:'DM Sans',sans-serif;padding-bottom:120px;}
+
+.op-hero{position:relative;padding:52px 20px 60px;overflow:hidden;}
+.op-hero-radial{position:absolute;inset:0;background:radial-gradient(ellipse 90% 70% at 50% -10%, rgba(255,107,0,.2) 0%, transparent 65%);pointer-events:none;}
+.op-hero-inner{position:relative;z-index:2;}
+.op-hero-eyebrow{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.2px;margin-bottom:10px;}
+.op-hero-title{font-family:'Syne',sans-serif;font-size:clamp(34px,9vw,48px);font-weight:900;letter-spacing:-2px;line-height:1.05;margin-bottom:6px;}
+.op-hero-sub{font-size:14px;font-weight:600;opacity:.8;}
+.op-hero-wave{position:absolute;bottom:-28px;left:0;right:0;height:60px;clip-path:ellipse(56% 60px at 50% 0%);z-index:3;}
+
+.op-body{padding:44px 16px 0;max-width:620px;margin:0 auto;display:flex;flex-direction:column;gap:28px;}
+
+.op-section{display:flex;flex-direction:column;gap:12px;}
+.op-sec-head{display:flex;align-items:center;}
+.op-sec-pill{display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:20px;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.8px;}
+
+.op-empty-card{border-radius:22px;padding:40px 20px;display:flex;flex-direction:column;align-items:center;gap:10px;text-align:center;}
+.op-empty-orb{width:76px;height:76px;border-radius:24px;display:flex;align-items:center;justify-content:center;margin-bottom:4px;}
+.op-empty-title{font-family:'Syne',sans-serif;font-size:18px;font-weight:800;}
+.op-empty-sub{font-size:13px;font-weight:600;opacity:.7;}
+
+.op-skeleton-card{border-radius:20px;padding:24px;}
+.op-sk{border-radius:8px;background:linear-gradient(90deg,${sk} 25%,${sk2} 50%,${sk} 75%);background-size:200% 100%;animation:op-shimmer 1.4s infinite;display:block;}
+@keyframes op-shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+
+.op-order-list{display:flex;flex-direction:column;gap:10px;}
+.op-order-card{border-radius:20px;overflow:hidden;display:flex;cursor:pointer;position:relative;transition:transform .2s,box-shadow .2s;animation:op-in .42s ease both;}
+.op-order-card:hover{transform:translateY(-3px);box-shadow:0 12px 36px rgba(0,0,0,.16);}
+.op-order-stripe{width:5px;flex-shrink:0;}
+.op-order-body{flex:1;padding:14px 16px;display:flex;flex-direction:column;gap:8px;}
+.op-order-top{display:flex;align-items:center;justify-content:space-between;gap:8px;}
+.op-order-pill{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:800;}
+.op-order-ref{font-size:11px;font-weight:700;}
+.op-order-vendor{font-family:'Syne',sans-serif;font-size:15px;font-weight:800;}
+.op-order-items{font-size:12px;font-weight:600;}
+.op-order-foot{display:flex;align-items:center;justify-content:space-between;}
+.op-track-pill{display:flex;align-items:center;gap:4px;padding:5px 11px;border-radius:20px;font-size:12px;font-weight:800;}
+.op-pulse-row{position:absolute;bottom:10px;right:14px;display:flex;gap:4px;align-items:center;}
+.op-pulse-row span{width:5px;height:5px;border-radius:50%;background:${ACCENT};display:inline-block;}
+.op-pulse-row span:nth-child(1){animation:op-dot .9s 0s infinite ease-in-out;}
+.op-pulse-row span:nth-child(2){animation:op-dot .9s .18s infinite ease-in-out;}
+.op-pulse-row span:nth-child(3){animation:op-dot .9s .36s infinite ease-in-out;}
+@keyframes op-dot{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-5px)}}
+
+.op-cart-list{display:flex;flex-direction:column;gap:10px;}
+.op-cart-card{border-radius:20px;padding:14px 16px;display:flex;align-items:center;gap:13px;cursor:pointer;transition:transform .2s,border-color .2s,box-shadow .2s;animation:op-in .42s ease both;}
+.op-cart-card:hover{transform:translateY(-3px);border-color:${ACCENT} !important;box-shadow:0 10px 32px rgba(255,107,0,.15);}
+.op-cart-avatar{width:48px;height:48px;border-radius:14px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.op-cart-info{flex:1;min-width:0;}
+.op-cart-vrow{display:flex;align-items:center;gap:6px;margin-bottom:3px;}
+.op-cart-vname{font-family:'Syne',sans-serif;font-size:14px;font-weight:800;}
+.op-cart-badge{font-size:10px;font-weight:800;color:white;width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;}
+.op-cart-item-row{font-size:11.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.op-cart-viewall{font-size:11px;font-weight:800;text-decoration:underline;text-underline-offset:2px;margin-top:1px;}
+.op-cart-continue{display:flex;flex-direction:column;align-items:center;gap:3px;flex-shrink:0;}
+.op-cart-total{font-size:13px;font-weight:900;font-family:'Syne',sans-serif;}
+
+.op-history-card{border-radius:20px;padding:16px;display:flex;align-items:center;gap:14px;cursor:pointer;transition:transform .2s;}
+.op-history-card:hover{transform:translateY(-1px);}
+.op-history-icon{width:46px;height:46px;border-radius:14px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+
+/* VCP */
+.vcp-root{min-height:100vh;font-family:'DM Sans',sans-serif;}
+.vcp-header{padding:14px 16px;display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:10;backdrop-filter:blur(10px);}
+.vcp-back-btn{width:38px;height:38px;border-radius:11px;background:transparent;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;}
+.vcp-header-badge{display:flex;align-items:center;gap:5px;padding:6px 12px;border-radius:20px;font-size:13px;font-weight:800;}
+.vcp-body{padding:14px 16px;display:flex;flex-direction:column;gap:14px;max-width:620px;margin:0 auto;}
+.vcp-section-card{border-radius:20px;overflow:hidden;}
+.vcp-card-head{display:flex;align-items:center;gap:7px;padding:12px 16px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.7px;}
+.vcp-item{display:flex;align-items:center;gap:12px;padding:11px 16px;}
+.vcp-item-thumb{width:52px;height:52px;border-radius:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0;overflow:hidden;}
+.vcp-qty-row{display:flex;align-items:center;gap:3px;background:rgba(255,107,0,.09);border-radius:12px;padding:3px 4px;border:1px solid rgba(255,107,0,.18);}
+.vcp-qty-btn{width:30px;height:30px;border-radius:9px;background:transparent;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .15s;}
+.vcp-qty-btn:hover{background:rgba(255,107,0,.2);}
+.vcp-addr-row{display:flex;align-items:center;gap:12px;padding:13px 16px;}
+.vcp-change-btn{border-radius:10px;padding:5px 13px;font-size:11px;font-weight:800;cursor:pointer;border-width:1.5px;border-style:solid;flex-shrink:0;}
+.vcp-add-addr{width:calc(100% - 32px);display:flex;align-items:center;justify-content:center;gap:8px;padding:14px;border-radius:14px;font-size:13px;font-weight:700;cursor:pointer;margin:0 16px 14px;}
+.vcp-feat-label{display:flex;align-items:center;gap:7px;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.7px;padding:0 2px;}
+.vcp-feat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
+@media(max-width:380px){.vcp-feat-grid{grid-template-columns:repeat(2,1fr);}}
+.vcp-feat-card{border-radius:16px;overflow:hidden;display:flex;flex-direction:column;}
+.vcp-feat-img{height:92px;display:flex;align-items:center;justify-content:center;overflow:hidden;}
+.vcp-feat-add{display:flex;align-items:center;justify-content:center;gap:5px;width:100%;border:none;border-radius:9px;padding:7px;color:white;font-size:11px;font-weight:800;cursor:pointer;margin-top:7px;transition:transform .15s,background .3s;}
+.vcp-feat-add:hover{transform:scale(1.04);}
+.vcp-feat-add.added{background:#10B981!important;}
+.vcp-view-more{width:100%;display:flex;align-items:center;justify-content:center;gap:8px;padding:13px;border-radius:14px;font-size:13px;font-weight:800;cursor:pointer;}
+
+/* FIX: Sticky bottom bar — sits above the bottom nav tab (nav is ~64px tall) */
+.vcp-sticky-bar{
+  position:fixed;bottom:64px;left:0;right:0;z-index:50;
+  padding:12px 16px 14px;
+  display:flex;align-items:center;gap:14px;
+  box-shadow:0 -4px 24px rgba(0,0,0,.22);
+}
+.vcp-pay-btn-sticky{
+  flex-shrink:0;
+  background:linear-gradient(135deg,${ACCENT},${ACCENT2});
+  color:white;border:none;border-radius:16px;padding:14px 20px;
+  font-family:'Syne',sans-serif;font-size:14px;font-weight:900;
+  display:flex;align-items:center;gap:8px;
+  box-shadow:0 6px 24px rgba(255,107,0,.4);cursor:pointer;
+  transition:transform .2s,box-shadow .2s;white-space:nowrap;
+}
+.vcp-pay-btn-sticky:hover:not(:disabled){transform:translateY(-2px);box-shadow:0 10px 32px rgba(255,107,0,.5);}
+.vcp-pay-btn-sticky:active:not(:disabled){transform:scale(.97);}
+.vcp-pay-btn-sticky:disabled{opacity:.42;cursor:not-allowed;}
+
+/* Address picker */
+.ap-addr-option{border-radius:18px;padding:14px 16px;display:flex;align-items:center;gap:12px;cursor:pointer;transition:border-color .2s,box-shadow .2s;}
+.ap-addr-option:hover{border-color:${ACCENT} !important;}
+
+/* Payment */
+.pay-method{transition:border-color .2s,box-shadow .2s;}
+.pay-radio{width:22px;height:22px;border-radius:50%;border:2px solid;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.pay-radio-dot{width:11px;height:11px;border-radius:50%;background:${ACCENT};}
+
+/* Mini spinner */
+.mini-spin{width:15px;height:15px;border:2px solid rgba(255,255,255,.3);border-top-color:white;border-radius:50%;animation:op-spin .7s linear infinite;flex-shrink:0;display:inline-block;}
+@keyframes op-spin{to{transform:rotate(360deg)}}
+@keyframes vcp-spin{to{transform:rotate(360deg)}}
+
+@keyframes op-in{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
+
+@media(min-width:600px){
+  .op-body{padding:52px 24px 0;}
+  .vcp-body{padding:20px 24px;}
+  .vcp-sticky-bar{bottom:64px;padding:14px 24px 16px;}
+}
+`;
 }

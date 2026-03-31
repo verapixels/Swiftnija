@@ -35,6 +35,8 @@ import RiderSignup from "./Pages/RidersSignupPage";
 import RiderProfile from "./Pages/Riderprofile";
 import LandingPage from "./Pages/Landingpage";
 import   ResetPassword from "./Pages/ResetPassword";
+import { VendorCartPage } from "./Pages/CustomerOrdersPage";
+
 
 function OrderTrackingWrapper() {
   const navigate = useNavigate();
@@ -227,6 +229,7 @@ export default function App() {
          
           <Route path="/home" element={<Homepage />} />
           <Route path="/orders"                  element={<CustomerOrdersPage />} />
+          <Route path="/orders/cart/:vendorId" element={<VendorCartPage />} />
           <Route path="/search"                  element={<SearchPage />} />
           <Route path="/support"                 element={<SupportPage />} />
           <Route path="/profile"                 element={<UserProfile />} />
