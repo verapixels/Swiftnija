@@ -263,36 +263,36 @@ export default function VendorPayoutsPage() {
     });
   }, [vendorId]);
 
-  // Fetch total from Paystack subaccount transactions (real source of truth)
   const fetchPaystackTotal = useCallback(async () => {
-    if (!vendorId) return;
-    setBalanceLoading(true);
-    try {
-      // Get subaccount_code from vendorBankAccounts
-      const bankSnap = await getDocs(
-        query(collection(db, "vendorBankAccounts"), where("vendorId", "==", vendorId), limit(1))
-      );
-      const subaccount_code = bankSnap.docs[0]?.data()?.subaccount_code;
-      if (!subaccount_code) {
-        setPaystackTotal(null);
-        setBalanceLoading(false);
-        return;
-      }
-      const fn = httpsCallable(fns, "paystackGetTransactions");
-      const result = await fn({ subaccount_code }) as any;
-      const txData: any[] = result.data?.transactions ?? [];
-      // Sum successful transactions (Paystack amounts are in kobo)
-      const total = txData
-        .filter((t: any) => t.status === "success")
-        .reduce((sum: number, t: any) => sum + (t.amount ?? 0), 0) / 100;
-      setPaystackTotal(total);
-    } catch (err) {
-      console.error("Paystack total fetch failed:", err);
+  if (!vendorId) return;
+  setBalanceLoading(true);
+  try {
+    // ✅ Read subaccount_code directly from vendors doc, not vendorBankAccounts
+    const vendorSnap = await getDocs(
+      query(collection(db, "vendors"), where("uid", "==", vendorId), limit(1))
+    );
+    const subaccount_code = vendorSnap.docs[0]?.data()?.bankAccount?.subaccount_code;
+
+    if (!subaccount_code) {
       setPaystackTotal(null);
-    } finally {
       setBalanceLoading(false);
+      return;
     }
-  }, [vendorId, fns]);
+
+    const fn = httpsCallable(fns, "paystackGetTransactions");
+    const result = await fn({ subaccount_code }) as any;
+    const txData: any[] = result.data?.transactions ?? [];
+    const total = txData
+      .filter((t: any) => t.status === "success")
+      .reduce((sum: number, t: any) => sum + (t.amount ?? 0), 0) / 100;
+    setPaystackTotal(total);
+  } catch (err) {
+    console.error("Paystack total fetch failed:", err);
+    setPaystackTotal(null);
+  } finally {
+    setBalanceLoading(false);
+  }
+}, [vendorId, fns]);
 
   useEffect(() => { fetchPaystackTotal(); }, [fetchPaystackTotal]);
 
@@ -364,14 +364,23 @@ export default function VendorPayoutsPage() {
   };
 
   const handleUnlink = async () => {
-    setUnlinking(true);
-    try {
-      await deleteDoc(doc(db, "vendorBankAccounts", vendorId));
-      addToast("Bank account unlinked");
-      setPaystackTotal(null);
-    } catch { addToast("Failed to unlink", false); }
-    finally { setUnlinking(false); }
-  };
+  setUnlinking(true);
+  try {
+    // ✅ Remove bankAccount field from vendors doc instead
+    const { updateDoc, doc: firestoreDoc } = await import("firebase/firestore");
+    const { deleteField } = await import("firebase/firestore");
+    await updateDoc(firestoreDoc(db, "vendors", vendorId), {
+      bankAccount: deleteField(),
+      bankLinked: deleteField(),
+    });
+    addToast("Bank account unlinked");
+    setPaystackTotal(null);
+  } catch {
+    addToast("Failed to unlink", false);
+  } finally {
+    setUnlinking(false);
+  }
+};
 
   const settledCount = txs.filter(t => !t.settlementStatus || t.settlementStatus === "settled").length;
   const pendingCount = txs.filter(t => t.settlementStatus === "pending").length;

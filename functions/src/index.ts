@@ -2612,3 +2612,4 @@ export const reassignStuckOrders = onSchedule("every 2 minutes", async () => {
 export * from "./vendorPayouts";
 export * from "./riderPayouts";
 export * from "./adminPayouts";
+export * from "./paystackDVA";
