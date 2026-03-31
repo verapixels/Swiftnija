@@ -1,10 +1,9 @@
-import {onCall, HttpsError} from "firebase-functions/v2/https";
+import {onCall, HttpsError, onRequest} from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
 import * as crypto from "crypto";
 import {buildOtpEmail} from "./otpEmailTemplate";
 import {onDocumentUpdated, onDocumentCreated} from "firebase-functions/v2/firestore";
 import {onSchedule} from "firebase-functions/v2/scheduler";
-import { onRequest } from "firebase-functions/v2/https";
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -628,33 +627,33 @@ export const paystackInitializeOrderPayment = onCall({
   secrets: ["PAYSTACK_SECRET_KEY"],
 }, async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "You must be signed in.");
- 
+
   const uid = request.auth.uid;
   const email = request.auth.token.email;
   if (!email) throw new HttpsError("invalid-argument", "No email on account.");
- 
-  const { orderId, amountKobo, vendorSubaccountCode } = request.data as {
+
+  const {orderId, amountKobo, vendorSubaccountCode} = request.data as {
     orderId: string;
     amountKobo: number;
     vendorSubaccountCode?: string;
   };
- 
+
   if (!orderId) throw new HttpsError("invalid-argument", "orderId required.");
   if (!amountKobo || amountKobo < 10000) {
     throw new HttpsError("invalid-argument", "Minimum order is ₦100.");
   }
- 
+
   // Read split percentage from Firestore so admin can change it any time
   const settingsSnap = await db.collection("platformSettings").doc("global").get();
   const settings = settingsSnap.exists ? settingsSnap.data()! : {};
   const vendorItemPercent = Number(settings.vendorItemPercent ?? 80);
- 
+
   const secretKey = process.env.PAYSTACK_SECRET_KEY;
   if (!secretKey) throw new HttpsError("internal", "Paystack secret key not configured.");
- 
+
   // Reference ties this Paystack transaction to your order document
   const reference = `swiftnija_order_${orderId}_${Date.now()}`;
- 
+
   // Save a pending record so the webhook can look it up by reference
   await db.collection("orderPendingTx").doc(reference).set({
     uid,
@@ -665,7 +664,7 @@ export const paystackInitializeOrderPayment = onCall({
     status: "pending",
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
   });
- 
+
   // Build the Paystack request body
   const body: Record<string, unknown> = {
     email,
@@ -680,7 +679,7 @@ export const paystackInitializeOrderPayment = onCall({
       purpose: "order_payment",
     },
   };
- 
+
   // Wire in the split only if the vendor has a linked subaccount
   if (vendorSubaccountCode) {
     body.split = {
@@ -694,7 +693,7 @@ export const paystackInitializeOrderPayment = onCall({
       ],
     };
   }
- 
+
   const res = await fetch("https://api.paystack.co/transaction/initialize", {
     method: "POST",
     headers: {
@@ -703,7 +702,7 @@ export const paystackInitializeOrderPayment = onCall({
     },
     body: JSON.stringify(body),
   });
- 
+
   const data = await res.json() as {
     status: boolean;
     message: string;
@@ -713,13 +712,13 @@ export const paystackInitializeOrderPayment = onCall({
       reference: string;
     };
   };
- 
+
   if (!data.status) {
     throw new HttpsError("internal", `Paystack error: ${data.message}`);
   }
- 
+
   console.info(`[paystackInitializeOrderPayment] uid=${uid} orderId=${orderId} ref=${reference} amount=₦${amountKobo / 100}`);
- 
+
   return {
     success: true,
     authorizationUrl: data.data.authorization_url,
@@ -727,8 +726,8 @@ export const paystackInitializeOrderPayment = onCall({
     reference: data.data.reference,
   };
 });
- 
- 
+
+
 // ─────────────────────────────────────────
 // FUNCTION 14 (NEW): paystackWebhook
 export const paystackWebhook = onRequest({
@@ -740,7 +739,7 @@ export const paystackWebhook = onRequest({
     res.status(405).send("Method Not Allowed");
     return;
   }
- 
+
   // Verify the request actually came from Paystack using HMAC signature
   const secretKey = process.env.PAYSTACK_SECRET_KEY;
   if (!secretKey) {
@@ -748,23 +747,23 @@ export const paystackWebhook = onRequest({
     res.status(500).send("Server error");
     return;
   }
- 
+
   const signature = req.headers["x-paystack-signature"] as string;
-  const rawBody   = JSON.stringify(req.body);
-  const hash      = crypto
+  const rawBody = JSON.stringify(req.body);
+  const hash = crypto
     .createHmac("sha512", secretKey)
     .update(rawBody)
     .digest("hex");
- 
+
   if (hash !== signature) {
     console.warn("[paystackWebhook] Invalid signature — request ignored");
     res.status(400).send("Invalid signature");
     return;
   }
- 
+
   // Acknowledge receipt immediately — Paystack expects 200 within 5 seconds
   res.status(200).send("OK");
- 
+
   const event = req.body as {
     event: string;
     data: {
@@ -774,15 +773,15 @@ export const paystackWebhook = onRequest({
       customer: { email: string };
     };
   };
- 
+
   // We only care about successful charge events
   if (event.event !== "charge.success") {
     console.info(`[paystackWebhook] Ignored event: ${event.event}`);
     return;
   }
- 
-  const { reference, amount: paidAmountKobo } = event.data;
- 
+
+  const {reference, amount: paidAmountKobo} = event.data;
+
   try {
     // Look up the pending transaction record we created during initialization
     const pendingSnap = await db.collection("orderPendingTx").doc(reference).get();
@@ -790,77 +789,76 @@ export const paystackWebhook = onRequest({
       console.warn(`[paystackWebhook] No pending tx found for ref: ${reference}`);
       return;
     }
- 
+
     const pending = pendingSnap.data()!;
- 
+
     // Idempotency — don't process the same payment twice
     if (pending.status === "success") {
       console.info(`[paystackWebhook] Already processed ref: ${reference}`);
       return;
     }
- 
+
     // Verify the amount matches what we expected
     if (paidAmountKobo !== pending.amountKobo) {
       console.error(`[paystackWebhook] Amount mismatch! expected=${pending.amountKobo} got=${paidAmountKobo} ref=${reference}`);
       return;
     }
- 
-    const { orderId, uid } = pending;
- 
+
+    const {orderId, uid} = pending;
+
     // Verify the order actually exists
-    const orderRef  = db.collection("orders").doc(orderId);
+    const orderRef = db.collection("orders").doc(orderId);
     const orderSnap = await orderRef.get();
     if (!orderSnap.exists) {
       console.error(`[paystackWebhook] Order not found: ${orderId}`);
       return;
     }
- 
+
     const orderData = orderSnap.data()!;
- 
+
     // Don't double-confirm
     if (orderData.paymentStatus === "paid") {
       console.info(`[paystackWebhook] Order already confirmed: ${orderId}`);
-      await db.collection("orderPendingTx").doc(reference).update({ status: "success" });
+      await db.collection("orderPendingTx").doc(reference).update({status: "success"});
       return;
     }
- 
+
     const now = admin.firestore.FieldValue.serverTimestamp();
     const batch = db.batch();
- 
+
     // Mark the order as paid and move it to confirmed so rider assignment kicks in
     batch.update(orderRef, {
-      paymentStatus:      "paid",
-      status:             "confirmed",
-      paystackReference:  reference,
+      paymentStatus: "paid",
+      status: "confirmed",
+      paystackReference: reference,
       paidAmountKobo,
-      paidAt:             now,
-      updatedAt:          now,
-    });
- 
-    // Mark the pending tx as processed
-    batch.update(db.collection("orderPendingTx").doc(reference), {
-      status:    "success",
+      paidAt: now,
       updatedAt: now,
     });
- 
+
+    // Mark the pending tx as processed
+    batch.update(db.collection("orderPendingTx").doc(reference), {
+      status: "success",
+      updatedAt: now,
+    });
+
     // Log the payment in a payments collection for your records
     const paymentRef = db.collection("payments").doc(reference);
     batch.set(paymentRef, {
       reference,
       orderId,
       uid,
-      amountKobo:   paidAmountKobo,
-      amountNaira:  paidAmountKobo / 100,
-      channel:      event.data.status,
+      amountKobo: paidAmountKobo,
+      amountNaira: paidAmountKobo / 100,
+      channel: event.data.status,
       customerEmail: event.data.customer.email,
-      source:       "paystack_webhook",
-      createdAt:    now,
+      source: "paystack_webhook",
+      createdAt: now,
     });
- 
+
     await batch.commit();
- 
+
     console.info(`[paystackWebhook] Order ${orderId} confirmed. ₦${paidAmountKobo / 100} paid. ref=${reference}`);
- 
   } catch (err) {
     console.error("[paystackWebhook] Error processing webhook:", err);
   }
@@ -1412,7 +1410,7 @@ export const updateOrderStatus = onCall({cors: CORS_ORIGINS}, async (request) =>
 
       const alreadyDistributed = orderData2.creditsDistributed === true;
 
-       if (!alreadyDistributed) {
+      if (!alreadyDistributed) {
         const storedSplits = orderData2.splitAmounts as {
       vendorAmount: number;
       riderAmount: number;
