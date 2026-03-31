@@ -1,12 +1,11 @@
-
 import { useState, useEffect, useRef } from "react";
 import { httpsCallable } from "firebase/functions";
 import { functions } from "../firebase";
 import { useRiderSound } from "../hooks/useRiderSound";
- 
+
 const O = "#FF6B00";
-const COUNTDOWN_SECONDS = 60; // ← Changed from 30 to 60
- 
+const COUNTDOWN_SECONDS = 60;
+
 type IncomingOrder = {
   orderId: string;
   vendorName: string;
@@ -14,34 +13,68 @@ type IncomingOrder = {
   title?: string;
   body?: string;
 };
- 
+
 type Props = {
   order: IncomingOrder;
   onDismiss: () => void;
 };
- 
+
 export default function IncomingOrderAlert({ order, onDismiss }: Props) {
   const [secondsLeft, setSecondsLeft] = useState(COUNTDOWN_SECONDS);
-  const [loading,     setLoading]     = useState<"accept" | "reject" | null>(null);
-  const [result,      setResult]      = useState<"accepted" | "rejected" | null>(null);
+  const [loading, setLoading] = useState<"accept" | "reject" | null>(null);
+  const [result, setResult] = useState<"accepted" | "rejected" | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const { soundOn, toggleSound, playNewOrderSound } = useRiderSound();
- 
-  // Play sound when alert appears
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const { soundOn, toggleSound } = useRiderSound();
+
+  // ── Sound: create once, loop until stopped ──────────────────────────────
   useEffect(() => {
-    playNewOrderSound();
-    // Repeat sound every 8 seconds while alert is visible
-    const repeatInterval = setInterval(() => playNewOrderSound(), 8000);
-    return () => clearInterval(repeatInterval);
-  }, []);
- 
-  // Countdown timer — auto-reject at 0
+    const audio = new Audio("/alert.mp3");
+    audio.loop = true;
+    audioRef.current = audio;
+
+    if (soundOn) {
+      // Resume AudioContext if suspended (browser autoplay policy)
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      if (ctx.state === "suspended") {
+        ctx.resume().then(() => audio.play().catch(() => {}));
+      } else {
+        audio.play().catch(() => {});
+      }
+    }
+
+    return () => {
+      audio.pause();
+      audio.src = "";
+    };
+  }, []); // mount only
+
+  // Toggle sound on/off when soundOn changes
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (soundOn) {
+      audio.play().catch(() => {});
+    } else {
+      audio.pause();
+    }
+  }, [soundOn]);
+
+  const stopSound = () => {
+    const audio = audioRef.current;
+    if (audio) {
+      audio.pause();
+      audio.currentTime = 0;
+    }
+  };
+
+  // ── Countdown ──────────────────────────────────────────────────────────
   useEffect(() => {
     timerRef.current = setInterval(() => {
       setSecondsLeft(s => {
         if (s <= 1) {
           clearInterval(timerRef.current!);
-          handleReject(); // auto-reject → triggers reassignment
+          handleReject();
           return 0;
         }
         return s - 1;
@@ -49,10 +82,11 @@ export default function IncomingOrderAlert({ order, onDismiss }: Props) {
     }, 1000);
     return () => clearInterval(timerRef.current!);
   }, []);
- 
+
   const handleAccept = async () => {
     if (loading) return;
     clearInterval(timerRef.current!);
+    stopSound();
     setLoading("accept");
     try {
       const fn = httpsCallable(functions, "acceptOrder");
@@ -64,10 +98,11 @@ export default function IncomingOrderAlert({ order, onDismiss }: Props) {
       setLoading(null);
     }
   };
- 
+
   const handleReject = async () => {
     if (loading) return;
     clearInterval(timerRef.current!);
+    stopSound();
     setLoading("reject");
     try {
       const fn = httpsCallable(functions, "rejectOrder");
@@ -79,13 +114,13 @@ export default function IncomingOrderAlert({ order, onDismiss }: Props) {
       setLoading(null);
     }
   };
- 
-  const RADIUS       = 28;
+
+  const RADIUS = 28;
   const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
-  const progress     = secondsLeft / COUNTDOWN_SECONDS;
-  const dashOffset   = CIRCUMFERENCE * (1 - progress);
-  const isUrgent     = secondsLeft <= 15;
- 
+  const progress = secondsLeft / COUNTDOWN_SECONDS;
+  const dashOffset = CIRCUMFERENCE * (1 - progress);
+  const isUrgent = secondsLeft <= 15;
+
   return (
     <>
       <style>{`
@@ -104,7 +139,7 @@ export default function IncomingOrderAlert({ order, onDismiss }: Props) {
         .iao-card { animation: iao-slide-up 0.45s cubic-bezier(.34,1.3,.64,1) both; }
         .iao-urgent { animation: iao-urgent-flash 0.8s ease-in-out infinite; }
       `}</style>
- 
+
       <div style={{
         position: "fixed", inset: 0, zIndex: 9999,
         background: "rgba(0,0,0,0.88)",
@@ -125,7 +160,6 @@ export default function IncomingOrderAlert({ order, onDismiss }: Props) {
             display: "flex", flexDirection: "column", gap: 22,
           }}
         >
-          {/* Result states */}
           {result === "accepted" && (
             <div style={{ textAlign: "center", padding: "20px 0" }}>
               <div style={{ fontSize: 52, marginBottom: 12 }}>✅</div>
@@ -137,7 +171,7 @@ export default function IncomingOrderAlert({ order, onDismiss }: Props) {
               </div>
             </div>
           )}
- 
+
           {result === "rejected" && (
             <div style={{ textAlign: "center", padding: "20px 0" }}>
               <div style={{ fontSize: 52, marginBottom: 12 }}>❌</div>
@@ -146,7 +180,7 @@ export default function IncomingOrderAlert({ order, onDismiss }: Props) {
               </div>
             </div>
           )}
- 
+
           {!result && (
             <>
               {/* Header */}
@@ -178,7 +212,7 @@ export default function IncomingOrderAlert({ order, onDismiss }: Props) {
                     </div>
                   </div>
                 </div>
- 
+
                 {/* Countdown ring */}
                 <div style={{ position: "relative", width: 68, height: 68, flexShrink: 0 }}>
                   <svg width="68" height="68" viewBox="0 0 68 68" style={{ transform: "rotate(-90deg)" }}>
@@ -206,7 +240,7 @@ export default function IncomingOrderAlert({ order, onDismiss }: Props) {
                   </div>
                 </div>
               </div>
- 
+
               {/* Order details */}
               <div style={{
                 background: "#16161f", border: "1px solid #1e1e2c",
@@ -229,7 +263,7 @@ export default function IncomingOrderAlert({ order, onDismiss }: Props) {
                   </span>
                 </div>
               </div>
- 
+
               {/* Sound toggle */}
               <div style={{
                 display: "flex", alignItems: "center", justifyContent: "space-between",
@@ -253,7 +287,7 @@ export default function IncomingOrderAlert({ order, onDismiss }: Props) {
                   {soundOn ? "🔊 On" : "🔇 Off"}
                 </button>
               </div>
- 
+
               {/* Buttons */}
               <div style={{ display: "flex", gap: 12 }}>
                 <button
@@ -271,7 +305,7 @@ export default function IncomingOrderAlert({ order, onDismiss }: Props) {
                 >
                   {loading === "reject" ? <Spinner color="#66668a" /> : <>❌ Reject</>}
                 </button>
- 
+
                 <button
                   onClick={handleAccept}
                   disabled={!!loading}
@@ -289,8 +323,7 @@ export default function IncomingOrderAlert({ order, onDismiss }: Props) {
                   {loading === "accept" ? <Spinner color="white" /> : <>✅ Accept Order</>}
                 </button>
               </div>
- 
-              {/* Urgent warning */}
+
               {isUrgent && (
                 <p style={{
                   textAlign: "center", fontSize: 12, fontWeight: 700,
@@ -307,7 +340,7 @@ export default function IncomingOrderAlert({ order, onDismiss }: Props) {
     </>
   );
 }
- 
+
 function Spinner({ color }: { color: string }) {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
@@ -318,4 +351,3 @@ function Spinner({ color }: { color: string }) {
     </svg>
   );
 }
- 

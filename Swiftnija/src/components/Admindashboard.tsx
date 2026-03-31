@@ -2101,7 +2101,7 @@ function PlatformSettingsPage({ adminUser, showToast, C }: { adminUser: AdminUse
             <h3 style={{ color: C.text, fontWeight: 800, fontSize: 15, marginBottom: 4 }}>Support Contact</h3>
             <p style={{ color: C.muted, fontSize: 12, marginBottom: 16 }}>Displayed to users needing help</p>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-              <div><label style={lbl}>Support Email</label><input type="email" value={settings.supportEmail} onChange={e => setSettings(s => ({ ...s, supportEmail: e.target.value }))} placeholder="support@swiftnija.com" style={inp} /></div>
+              <div><label style={lbl}>Support Email</label><input type="email" value={settings.supportEmail} onChange={e => setSettings(s => ({ ...s, supportEmail: e.target.value }))} placeholder="support@swift9ja.com" style={inp} /></div>
               <div><label style={lbl}>Support Phone</label><input type="tel" value={settings.supportPhone} onChange={e => setSettings(s => ({ ...s, supportPhone: e.target.value }))} placeholder="+234..." style={inp} /></div>
             </div>
           </div>

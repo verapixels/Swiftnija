@@ -47,7 +47,7 @@ type SupportSettings = {
 };
 
 const DEFAULT_SETTINGS: SupportSettings = {
-  phone: "+234 800 SWIFT 00", email: "support@swiftnija.com",
+  phone: "+234 800 SWIFT 00", email: "support@swift9ja.com",
   address: "Plot 14, Lekki Phase 1, Lagos, Nigeria",
   whatsapp: "+2348001234567", openingHours: "8:00 AM",
   closingHours: "8:00 PM", workDays: "Monday – Saturday", isOpen: true,

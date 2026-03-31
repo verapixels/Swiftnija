@@ -14,7 +14,7 @@ const db = admin.firestore();
 const OTP_EXPIRY_MS = 5 * 60 * 1000;
 const RATE_LIMIT_MAX = 3;
 const RATE_WINDOW_MS = 10 * 60 * 1000;
-const FROM_ADDRESS = "Swiftnija <noreply@verapixels.com>";
+const FROM_ADDRESS = "Swift9ja <noreply@verapixels.com>";
 const CORS_ORIGINS = true;
 
 // ─────────────────────────────────────────
@@ -282,7 +282,7 @@ export const sendPasswordResetOtp = onCall({
 
   await sendViaResend({
     to: email,
-    subject: `${otp} — Your Swiftnija password reset code`,
+    subject: `${otp} — Your Swift9ja password reset code`,
     html,
   });
 
@@ -556,7 +556,7 @@ export const paystackInitializePayment = onCall({
     throw new HttpsError("invalid-argument", "Maximum top-up is ₦1,000,000 per transaction.");
   }
 
-  const reference = `swiftnija_wallet_${uid}_${Date.now()}`;
+  const reference = `swift9ja_wallet_${uid}_${Date.now()}`;
 
   await db.collection("walletPendingTx").doc(reference).set({
     uid,
@@ -652,7 +652,7 @@ export const paystackInitializeOrderPayment = onCall({
   if (!secretKey) throw new HttpsError("internal", "Paystack secret key not configured.");
 
   // Reference ties this Paystack transaction to your order document
-  const reference = `swiftnija_order_${orderId}_${Date.now()}`;
+  const reference = `swift9ja_order_${orderId}_${Date.now()}`;
 
   // Save a pending record so the webhook can look it up by reference
   await db.collection("orderPendingTx").doc(reference).set({
@@ -979,14 +979,14 @@ export const sendAdminInvite = onCall(
   <div class="wrapper">
     <div class="card">
       <div class="header">
-        <div class="logo">swift<span>nija</span></div>
+        <div class="logo">swift<span>9ja</span></div>
         <div class="tagline">Admin Portal Invitation</div>
       </div>
       <div class="body">
         <div class="greeting">You've been invited! 🎉</div>
         <p class="text">
           <strong style="color:#e8e8f5;">${inviterName}</strong> has invited you to join the
-          SwiftNija admin team as a <strong style="color:#e8e8f5;">${roleLabel}</strong>.
+           Swift9ja admin team as a <strong style="color:#e8e8f5;">${roleLabel}</strong>.
         </p>
         <div class="role-badge ${role === "superadmin" ? "role-superadmin" : "role-admin"}">
           ${roleLabel}
@@ -1010,7 +1010,7 @@ export const sendAdminInvite = onCall(
           If you weren't expecting this, you can safely ignore it.
         </div>
         <div class="footer-text" style="margin-top:8px;">
-          © SwiftNija · Nigeria's delivery platform
+          © Swift9ja · Nigeria's delivery platform
         </div>
       </div>
     </div>
@@ -1028,7 +1028,7 @@ export const sendAdminInvite = onCall(
       body: JSON.stringify({
         from: FROM_ADDRESS,
         to: [normalizedEmail],
-        subject: `You've been invited to join SwiftNija as ${roleLabel}`,
+        subject: `You've been invited to join Swift9ja as ${roleLabel}`,
         html: emailHtml,
       }),
     });
@@ -1861,7 +1861,7 @@ export const updateDeliveryStatus = onCall({cors: CORS_ORIGINS}, async (request)
 
 // ─── Email builder helpers ─────────────────────────────────────────────────
 const BRAND_COLOR = "#FF6B00";
-const APP_URL = process.env.APP_URL || "https://swiftnija.com";
+const APP_URL = process.env.APP_URL || "https://swift9ja.com";
 
 const SOCIAL_ICONS = `
 <table cellpadding="0" cellspacing="0" style="margin:0 auto;">
@@ -1950,10 +1950,11 @@ function emailFooter(): string {
       <p style="margin:0 0 16px;font-size:13px;color:#9898b8;font-weight:500;">Follow us</p>
       ${SOCIAL_ICONS}
       <p style="margin:20px 0 6px;font-size:12px;color:#b0b0c8;line-height:1.7;">
-        © ${new Date().getFullYear()} SwiftNija · Nigeria's Fast Delivery Platform
+        © ${new Date().getFullYear()} Swift9ja · Nigeria's Fast Delivery Platform
       </p>
       <p style="margin:0;font-size:12px;color:#c8c8d8;">
-        Questions? <a href="mailto:support@swiftnija.com" style="color:${BRAND_COLOR};font-weight:600;">support@swiftnija.com</a>
+        Questions? <a href="mailto:support@swift9ja.com
+" style="color:${BRAND_COLOR};font-weight:600;">support@swift9ja.com</a>
       </p>
     </td>
   </tr>`;
@@ -2099,7 +2100,7 @@ async function sendStatusEmail(opts: {
   let bodyContent = "";
 
   if (opts.type === "rider_assigned") {
-    subject = `Rider Found — Order ${orderRef} | SwiftNija`;
+    subject = `Rider Found — Order ${orderRef} | Swift9ja`;
     previewText = `Great news! Your rider ${opts.riderName ?? ""} has been assigned to your order.`;
 
     bodyContent = `
@@ -2192,7 +2193,7 @@ async function sendStatusEmail(opts: {
     </tr>
     ${emailFooter()}`;
   } else if (opts.type === "picked_up") {
-    subject = `Package Picked Up — Order ${orderRef} | SwiftNija`;
+    subject = `Package Picked Up — Order ${orderRef} | Swift9ja`;
     previewText = `Your package is on its way! ${opts.riderName ?? "Your rider"} has collected it.`;
 
     bodyContent = `
@@ -2260,8 +2261,8 @@ async function sendStatusEmail(opts: {
     </tr>
     ${emailFooter()}`;
   } else if (opts.type === "delivered") {
-    subject = `Delivered! Order ${orderRef} | SwiftNija`;
-    previewText = "Your order has been delivered successfully. Thank you for using SwiftNija!";
+    subject = `Delivered! Order ${orderRef} | Swift9ja`;
+    previewText = "Your order has been delivered successfully. Thank you for using Swift9ja!";
 
     bodyContent = `
     ${emailHeader("Delivered")}

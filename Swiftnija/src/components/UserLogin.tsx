@@ -352,8 +352,8 @@ const LockoutBanner = ({
             Too many failed login attempts. Your account has been frozen for security.
             Please contact our support team to unlock it.
           </div>
-          <a href="mailto:support@swiftnija.com" className="lockout-link">
-            support@swiftnija.com
+          <a href="mailto:support@swift9ja.com" className="lockout-link">
+            support@swift9ja.com
           </a>
         </div>
       </div>

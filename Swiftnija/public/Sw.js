@@ -1,9 +1,8 @@
-// public/sw.js — SwiftNija Vendor Push Notification Service Worker
-// Place this file in your /public folder so it's served at /sw.js
+// public/sw.js — Swift9ja Vendor Push Notification Service Worker
 
-const CACHE_NAME = "swiftnija-vendor-v1";
+const CACHE_NAME = "swift9ja-vendor-v1";
 
-self.addEventListener("install", (event) => {
+self.addEventListener("install", () => {
   self.skipWaiting();
 });
 
@@ -11,7 +10,6 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(clients.claim());
 });
 
-// Handle push events (for future FCM/web push integration)
 self.addEventListener("push", (event) => {
   if (!event.data) return;
 
@@ -19,14 +17,14 @@ self.addEventListener("push", (event) => {
   try {
     payload = event.data.json();
   } catch {
-    payload = { title: "SwiftNija", body: event.data.text() };
+    payload = { title: "Swift9ja", body: event.data.text() };
   }
 
   const options = {
     body: payload.body || "You have a new notification",
     icon: "/favicon.ico",
     badge: "/favicon.ico",
-    tag: payload.tag || "swiftnija-notif",
+    tag: payload.tag || "swift9ja-notif",
     requireInteraction: payload.requireInteraction || false,
     data: payload.data || {},
     actions: payload.actions || [
@@ -37,11 +35,10 @@ self.addEventListener("push", (event) => {
   };
 
   event.waitUntil(
-    self.registration.showNotification(payload.title || "SwiftNija", options)
+    self.registration.showNotification(payload.title || "Swift9ja", options)
   );
 });
 
-// Handle notification clicks
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
 
@@ -71,7 +68,6 @@ self.addEventListener("notificationclick", (event) => {
   );
 });
 
-// Background sync for offline order updates (future use)
 self.addEventListener("sync", (event) => {
   if (event.tag === "sync-orders") {
     console.log("[SW] Background sync: orders");

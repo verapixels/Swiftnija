@@ -21,7 +21,7 @@ messaging.onBackgroundMessage((payload) => {
   const orderId = payload.data?.orderId ?? "";
   const type    = payload.data?.type    ?? "new_order";
 
-  // Play sound by posting message to all open clients
+  // Tell all open Swift9ja tabs to play their looping alert sound
   self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
     for (const client of clientList) {
       client.postMessage({ type: "PLAY_NOTIFICATION_SOUND" });
@@ -48,14 +48,12 @@ self.addEventListener("notificationclick", (event) => {
   event.notification.close();
 
   const orderId = event.notification.data?.orderId;
-  // Use the exact route your React app uses for rider dashboard
   const urlToOpen = `${self.location.origin}/rider`;
 
   event.waitUntil(
     clients
       .matchAll({ type: "window", includeUncontrolled: true })
       .then((clientList) => {
-        // If rider app already open, focus and send order data
         for (const client of clientList) {
           if (client.url.includes("/rider")) {
             client.focus();
@@ -65,12 +63,9 @@ self.addEventListener("notificationclick", (event) => {
             return;
           }
         }
-        // No rider page open — open one
         return clients.openWindow(urlToOpen);
       })
   );
 });
 
-self.addEventListener("notificationclose", () => {
-  // notification dismissed — no action needed
-});
+self.addEventListener("notificationclose", () => {});
