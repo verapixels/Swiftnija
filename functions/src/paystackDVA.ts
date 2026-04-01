@@ -5,7 +5,7 @@
 // FIX 2: paystackWebhookV2 — replaces old webhook; handles money splitting
 //         (vendor via subaccount + rider via riderSplitWallets) on charge.success.
 
-import { onCall, HttpsError, onRequest } from "firebase-functions/v2/https";
+import {onCall, HttpsError, onRequest} from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
 import * as crypto from "crypto";
 
@@ -25,7 +25,7 @@ export const paystackCreateDVA = onCall(
   async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated", "Must be signed in");
 
-    const { orderId, amountKobo } = request.data as {
+    const {orderId, amountKobo} = request.data as {
       orderId: string;
       amountKobo: number;
     };
@@ -70,7 +70,7 @@ export const paystackCreateDVA = onCall(
       // Try to find existing customer
       const findRes = await fetch(
         `https://api.paystack.co/customer?email=${encodeURIComponent(email)}`,
-        { headers: { Authorization: `Bearer ${PAYSTACK_SECRET}` } }
+        {headers: {Authorization: `Bearer ${PAYSTACK_SECRET}`}}
       );
       const findData = await findRes.json() as { status: boolean; data: Array<{ customer_code: string }> };
       if (findData.status && findData.data?.length > 0) {
@@ -79,21 +79,21 @@ export const paystackCreateDVA = onCall(
         // Create new customer
         const createRes = await fetch("https://api.paystack.co/customer", {
           method: "POST",
-          headers: { "Authorization": `Bearer ${PAYSTACK_SECRET}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ email, first_name: orderData.customerName?.split(" ")[0] ?? "Customer" }),
+          headers: {"Authorization": `Bearer ${PAYSTACK_SECRET}`, "Content-Type": "application/json"},
+          body: JSON.stringify({email, first_name: orderData.customerName?.split(" ")[0] ?? "Customer"}),
         });
         const createData = await createRes.json() as { status: boolean; data: { customer_code: string } };
         if (!createData.status) throw new HttpsError("internal", "Failed to create Paystack customer");
         customerCode = createData.data.customer_code;
       }
       // Cache customer code on the order
-      await db.collection("orders").doc(orderId).update({ paystackCustomerCode: customerCode });
+      await db.collection("orders").doc(orderId).update({paystackCustomerCode: customerCode});
     }
 
     // Step 2: Create a DVA for the customer
     const dvaRes = await fetch("https://api.paystack.co/dedicated_account", {
       method: "POST",
-      headers: { "Authorization": `Bearer ${PAYSTACK_SECRET}`, "Content-Type": "application/json" },
+      headers: {"Authorization": `Bearer ${PAYSTACK_SECRET}`, "Content-Type": "application/json"},
       body: JSON.stringify({
         customer: customerCode,
         preferred_bank: "wema-bank", // Wema Bank (ALAT) — most reliable for DVAs in Nigeria
@@ -195,7 +195,7 @@ export const paystackWebhookV2 = onRequest(
 
     if (event.event !== "charge.success") return;
 
-    const { reference, amount: paidAmountKobo } = event.data;
+    const {reference, amount: paidAmountKobo} = event.data;
 
     try {
       // ── 1. Resolve order ─────────────────────────────────────────────────
@@ -262,7 +262,7 @@ export const paystackWebhookV2 = onRequest(
 
       // Mark pending tx (card flow)
       const pendingRef = db.collection("orderPendingTx").doc(reference);
-      batch.set(pendingRef, { status: "success", updatedAt: now }, { merge: true });
+      batch.set(pendingRef, {status: "success", updatedAt: now}, {merge: true});
 
       // Log payment
       batch.set(db.collection("payments").doc(reference), {
@@ -297,7 +297,6 @@ export const paystackWebhookV2 = onRequest(
       // watches for confirmed → finding_rider transition. If you want auto-assign,
       // set status to "finding_rider" here instead:
       // await db.collection("orders").doc(orderId).update({ status: "finding_rider" });
-
     } catch (err) {
       console.error("[paystackWebhookV2] Error:", err);
     }
