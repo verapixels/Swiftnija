@@ -21,6 +21,7 @@ export const paystackCreateDVA = onCall(
     region: "us-central1",
     enforceAppCheck: false,
     secrets: ["PAYSTACK_SECRET_KEY"],
+    cors: ["http://localhost:5173", "https://swiftnija-c0e04.web.app", "https://swiftnija-c0e04.firebaseapp.com"],
   },
   async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated", "Must be signed in");
