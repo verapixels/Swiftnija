@@ -100,7 +100,7 @@ const LABEL_COLORS: Record<string, string> = {
 };
 
 const parsePrice = (p: string) => parseFloat(String(p).replace(/[₦,\s]/g, "")) || 0;
-const fbFunctions = getFunctions();
+const fbFunctions = getFunctions(undefined, "us-central1");
 
 // ── Coord cache ───────────────────────────────────────────────────────────────
 const coordCache = new Map<string, any>();
