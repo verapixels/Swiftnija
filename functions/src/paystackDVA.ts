@@ -86,7 +86,7 @@ export const paystackCreateDVA = onCall(
             email,
             first_name: orderData.customerName?.split(" ")[0] ?? "Customer",
             last_name: orderData.customerName?.split(" ")[1] ?? "",
-            phone: orderData.customerPhone ?? "",
+            phone: orderData.customerPhone || "+2348000000000",
           }),
         });
         const createData = await createRes.json() as { status: boolean; data: { customer_code: string } };
