@@ -106,6 +106,7 @@ export const paystackCreateDVA = onCall(
       // To this:
       body: JSON.stringify({
         customer: customerCode,
+        preferred_bank: "titan-paystack",
       }),
     });
     const dvaData = await dvaRes.json() as {
