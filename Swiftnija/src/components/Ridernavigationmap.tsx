@@ -605,6 +605,7 @@ export default function RiderNavigationMap({
   const handleStatus = async (next: "picked_up" | "arriving" | "delivered") => {
     if (updating || liveStatus === next) return;
     setUpdating(true);
+    setLiveStatus(next);
     onStatusUpdate(next);
     if (next === "picked_up") speak(`Order picked up. Navigating to ${customerName || "customer"}.`, true);
     else if (next === "arriving") speak("Arriving at destination. Ask the customer for their delivery code.", true);
