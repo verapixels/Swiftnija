@@ -41,12 +41,15 @@ export const paystackCreateDVA = onCall(
 
     const uid = request.auth.uid;
     let email = request.auth.token.email ?? "";
+    let userPhone = "";
 
-    // Fetch email from Firestore if not in token
+    // Fetch email and phone from Firestore
+    const userSnap = await db.collection("users").doc(uid).get();
     if (!email) {
-      const userSnap = await db.collection("users").doc(uid).get();
       email = userSnap.data()?.email ?? "";
     }
+    userPhone = userSnap.data()?.phone ?? "";
+
     if (!email) throw new HttpsError("invalid-argument", "No email on account");
 
     // Check if a DVA was already created for this order (idempotency)
@@ -86,11 +89,11 @@ export const paystackCreateDVA = onCall(
             email,
             first_name: orderData.customerName?.split(" ")[0] ?? "Customer",
             last_name: orderData.customerName?.split(" ")[1] ?? "",
-            phone: orderData.customerPhone || "+2348000000000",
+            phone: orderData.customerPhone || userPhone || "",
           }),
         });
         const createData = await createRes.json() as { status: boolean; data: { customer_code: string } };
-        if (!createData.status) throw new HttpsError("internal", "Failed to create Paystack customer");
+        if (!createData.status) throw new HttpsError("invalid-argument", "Please add a phone number in your profile settings before using bank transfer");
         customerCode = createData.data.customer_code;
       }
       // Cache customer code on the order
