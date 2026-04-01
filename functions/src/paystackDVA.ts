@@ -97,6 +97,8 @@ export const paystackCreateDVA = onCall(
       await db.collection("orders").doc(orderId).update({paystackCustomerCode: customerCode});
     }
 
+    console.info("[paystackCreateDVA] Creating DVA for customer:", customerCode);
+
     // Step 2: Create a DVA for the customer
     const dvaRes = await fetch("https://api.paystack.co/dedicated_account", {
       method: "POST",
@@ -117,7 +119,7 @@ export const paystackCreateDVA = onCall(
     };
 
     if (!dvaData.status) {
-      // Some Paystack plans don't support DVA — fall back to regular charge
+      console.error("[paystackCreateDVA] DVA failed:", JSON.stringify(dvaData));
       throw new HttpsError("internal", `DVA creation failed: ${dvaData.message}`);
     }
 
