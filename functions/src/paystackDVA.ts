@@ -78,10 +78,16 @@ export const paystackCreateDVA = onCall(
         customerCode = findData.data[0].customer_code;
       } else {
         // Create new customer
+      // Create new customer
         const createRes = await fetch("https://api.paystack.co/customer", {
           method: "POST",
           headers: {"Authorization": `Bearer ${PAYSTACK_SECRET}`, "Content-Type": "application/json"},
-          body: JSON.stringify({email, first_name: orderData.customerName?.split(" ")[0] ?? "Customer"}),
+          body: JSON.stringify({
+            email,
+            first_name: orderData.customerName?.split(" ")[0] ?? "Customer",
+            last_name: orderData.customerName?.split(" ")[1] ?? "",
+            phone: orderData.customerPhone ?? "",
+          }),
         });
         const createData = await createRes.json() as { status: boolean; data: { customer_code: string } };
         if (!createData.status) throw new HttpsError("internal", "Failed to create Paystack customer");
