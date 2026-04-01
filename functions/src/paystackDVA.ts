@@ -103,9 +103,9 @@ export const paystackCreateDVA = onCall(
     const dvaRes = await fetch("https://api.paystack.co/dedicated_account", {
       method: "POST",
       headers: {"Authorization": `Bearer ${PAYSTACK_SECRET}`, "Content-Type": "application/json"},
+      // To this:
       body: JSON.stringify({
         customer: customerCode,
-        preferred_bank: "wema-bank", // Wema Bank (ALAT) — most reliable for DVAs in Nigeria
       }),
     });
     const dvaData = await dvaRes.json() as {
