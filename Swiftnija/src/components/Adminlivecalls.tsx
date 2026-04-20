@@ -1,10 +1,9 @@
 // components/AdminLiveCalls.tsx
 // Live Support Calls panel
-// Fixes: duplicate notifications, hold button, navigate-away while on call
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import {
-  collection, query, onSnapshot, orderBy, where, doc, updateDoc, serverTimestamp,
+  collection, query, onSnapshot, orderBy, where, doc, updateDoc,
 } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { db } from "../firebase";
@@ -48,6 +47,38 @@ interface ActiveCallState {
 // Global Daily ref — persists across navigation
 let globalCallObj: DailyCall | null = null;
 let globalActiveCallId: string | null = null;
+
+// ── FIX: Track remote audio elements (agent side mirrors customer side fix) ───
+// Same root cause: Daily.co does not auto-play remote audio on mobile.
+// The agent's browser must also manually subscribe and play remote tracks.
+const remoteAudioElements = new Map<string, HTMLAudioElement>();
+
+function attachRemoteAudio(participantId: string, track: MediaStreamTrack) {
+  let audioEl = remoteAudioElements.get(participantId);
+  if (!audioEl) {
+    audioEl = document.createElement("audio");
+    audioEl.autoplay = true;
+    audioEl.setAttribute("playsinline", "true");
+    document.body.appendChild(audioEl);
+    remoteAudioElements.set(participantId, audioEl);
+  }
+  const stream = new MediaStream([track]);
+  audioEl.srcObject = stream;
+  audioEl.play().catch(err => console.warn("[Admin Audio] play failed:", err));
+}
+
+function removeRemoteAudio(participantId: string) {
+  const audioEl = remoteAudioElements.get(participantId);
+  if (audioEl) {
+    audioEl.srcObject = null;
+    audioEl.remove();
+    remoteAudioElements.delete(participantId);
+  }
+}
+
+function removeAllRemoteAudio() {
+  remoteAudioElements.forEach((_, id) => removeRemoteAudio(id));
+}
 
 // ── Timer hook ────────────────────────────────────────────────────────────────
 function useTimer(running: boolean) {
@@ -183,8 +214,6 @@ export default function AdminLiveCalls({ C }: { C: Record<string, string> }) {
   const [activeCall, setActiveCall] = useState<ActiveCallState | null>(null);
   const [toastMsg, setToastMsg]     = useState<string | null>(null);
 
-  // Use a ref to track which calls we've already shown a notification for
-  // to prevent duplicate toasts when Firestore fires multiple times
   const notifiedCallIds = useRef<Set<string>>(new Set());
 
   // ── Toast ──────────────────────────────────────────────────────────────────
@@ -204,14 +233,13 @@ export default function AdminLiveCalls({ C }: { C: Record<string, string> }) {
     return onSnapshot(q, snap => {
       const newCalls = snap.docs.map(d => ({ id: d.id, ...d.data() } as SupportCall));
 
-      // ── FIX: only notify for genuinely new waiting calls once ──
       newCalls.forEach(call => {
         if (
           call.status === "waiting" &&
           !notifiedCallIds.current.has(call.id)
         ) {
           notifiedCallIds.current.add(call.id);
-          toast(`📞 New call from ${call.customerName}`);
+          toast(`New call from ${call.customerName}`);
         }
       });
 
@@ -220,17 +248,16 @@ export default function AdminLiveCalls({ C }: { C: Record<string, string> }) {
     });
   }, []);
 
-  // ── Restore active call on remount (navigate-away support) ─────────────────
+  // ── Restore active call on remount ─────────────────────────────────────────
   useEffect(() => {
     if (globalCallObj && globalActiveCallId) {
-      // There's an ongoing call — re-attach UI
       const call = calls.find(c => c.id === globalActiveCallId);
       if (call && !activeCall) {
         setActiveCall({
           callId:       globalActiveCallId,
           customerName: call.customerName,
           roomUrl:      call.roomUrl,
-          agentToken:   "",           // already joined, token not needed
+          agentToken:   "",
           muted:        false,
           onHold:       call.status === "hold",
         });
@@ -254,18 +281,52 @@ export default function AdminLiveCalls({ C }: { C: Record<string, string> }) {
       const res = await getToken({ callId });
       if (!res.data.success) throw new Error("Token generation failed");
 
-      // Destroy any stale instance
       if (globalCallObj) {
         try { await globalCallObj.destroy(); } catch {}
         globalCallObj = null;
       }
+      removeAllRemoteAudio();
 
       const call = DailyIframe.createCallObject({
         audioSource: true,
         videoSource: false,
+        // FIX: same subscription fix as customer side
+        subscribeToTracksAutomatically: true,
       });
-      globalCallObj     = call;
+      globalCallObj      = call;
       globalActiveCallId = callId;
+
+      // FIX: attach remote audio tracks as they arrive
+      call.on("track-started", (event) => {
+        if (!event?.participant || event.participant.local) return;
+        if (event.track?.kind !== "audio") return;
+        console.log("[Admin Daily] Remote audio track started:", event.participant.session_id);
+        attachRemoteAudio(event.participant.session_id, event.track);
+      });
+
+      call.on("track-stopped", (event) => {
+        if (!event?.participant || event.participant.local) return;
+        if (event.track?.kind !== "audio") return;
+        removeRemoteAudio(event.participant.session_id);
+      });
+
+      call.on("participant-left", (event) => {
+        if (event?.participant) {
+          removeRemoteAudio(event.participant.session_id);
+        }
+      });
+
+      call.on("joined-meeting", () => {
+        // Also catch tracks already present when we join
+        const participants = call.participants();
+        Object.values(participants).forEach((p) => {
+          if (p.local) return;
+          const audioTrack = p.tracks?.audio?.persistentTrack;
+          if (audioTrack && audioTrack.readyState === "live") {
+            attachRemoteAudio(p.session_id, audioTrack);
+          }
+        });
+      });
 
       call.on("left-meeting", () => {
         endActiveCall(callId);
@@ -309,6 +370,7 @@ export default function AdminLiveCalls({ C }: { C: Record<string, string> }) {
       globalCallObj      = null;
       globalActiveCallId = null;
     }
+    removeAllRemoteAudio();
 
     try {
       const end = httpsCallable(functions, "endSupportCall");
@@ -344,10 +406,9 @@ export default function AdminLiveCalls({ C }: { C: Record<string, string> }) {
   }, [activeCall]);
 
   // ── Cleanup on unmount ─────────────────────────────────────────────────────
-  // NOTE: We do NOT destroy globalCallObj here — it must survive navigation
   useEffect(() => {
     return () => {
-      // Nothing — call persists
+      // Intentionally not destroying globalCallObj — call persists on navigation
     };
   }, []);
 
@@ -357,7 +418,6 @@ export default function AdminLiveCalls({ C }: { C: Record<string, string> }) {
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div>
-      {/* Floating active-call bar — visible even when navigating away */}
       {activeCall && (
         <ActiveCallBar
           state={activeCall}
@@ -404,7 +464,7 @@ export default function AdminLiveCalls({ C }: { C: Record<string, string> }) {
               border: "1px solid rgba(255,107,0,0.2)",
               borderRadius: 8, padding: "2px 10px", fontSize: 11,
             }}>
-              📞 You are on a call
+              You are on a call
             </span>
           )}
         </p>

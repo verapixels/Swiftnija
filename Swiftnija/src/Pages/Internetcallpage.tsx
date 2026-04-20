@@ -31,17 +31,25 @@ interface CallData {
   customerToken?: string;
 }
 
-// ── Brand name fix ─────────────────────────────────────────────────────────────
-function fixBrandName(text: string): string {
+// ── FIX 1: Always convert to the spoken form "Swift Naija" BEFORE TTS ────────
+// Mobile TTS engines (especially on Android/iOS) have no idea what "9ja" is
+// and will phonetically mangle it. We replace it at the text level before
+// any speak() call so the engine only ever sees real words.
+function toSpeakableText(text: string): string {
   return text
+    // Catch every known variant of the brand name
     .replace(/swift\s*9ja/gi,  "Swift Naija")
     .replace(/swiftnija/gi,    "Swift Naija")
     .replace(/swift9ja/gi,     "Swift Naija")
-    .replace(/swift\s*nija/gi, "Swift Naija");
+    .replace(/swift\s*nija/gi, "Swift Naija")
+    .replace(/swiftnaija/gi,   "Swift Naija");
 }
 
-// ── speak() — guaranteed to resolve, never hangs ──────────────────────────────
+// ── speak() — guaranteed to resolve, never hangs ─────────────────────────────
 function speak(text: string, rate = 0.88, pitch = 1.05): Promise<void> {
+  // Convert BEFORE passing to the speech engine
+  const cleanText = toSpeakableText(text);
+
   return new Promise(resolve => {
     const hardTimeout = setTimeout(() => resolve(), 5000);
     const done = () => { clearTimeout(hardTimeout); resolve(); };
@@ -50,7 +58,7 @@ function speak(text: string, rate = 0.88, pitch = 1.05): Promise<void> {
     try { window.speechSynthesis.cancel(); } catch { /**/ }
 
     const trySpeak = () => {
-      const utt   = new SpeechSynthesisUtterance(fixBrandName(text));
+      const utt   = new SpeechSynthesisUtterance(cleanText);
       utt.rate    = rate;
       utt.pitch   = pitch;
       utt.volume  = 1;
@@ -86,15 +94,12 @@ function speak(text: string, rate = 0.88, pitch = 1.05): Promise<void> {
   });
 }
 
-// ── speakAll() — cancelled immediately when cancelledRef is set ───────────────
-// This is the KEY fix: every sentence checks cancelledRef before speaking.
-// When user cancels, we set cancelledRef.current = true and call
-// speechSynthesis.cancel() — the loop sees the flag and stops immediately.
+// ── speakAll() — cancelled immediately when cancelledRef is set ──────────────
 async function speakAll(lines: string[], cancelledRef: React.MutableRefObject<boolean>): Promise<void> {
   for (const line of lines) {
-    if (cancelledRef.current) return; // ← stop immediately if cancelled
+    if (cancelledRef.current) return;
     await speak(line);
-    if (cancelledRef.current) return; // ← stop immediately after each line too
+    if (cancelledRef.current) return;
     await new Promise(r => setTimeout(r, 350));
   }
 }
@@ -238,6 +243,41 @@ function StarRating({
   );
 }
 
+// ── FIX 2: Track audio elements so we can clean them up ──────────────────────
+// Daily.co does NOT auto-play remote audio tracks on mobile. You must
+// listen for track-started events and manually create/play Audio elements
+// (or attach to existing ones). We keep a map of participantId -> <audio>
+// so we can clean up properly on leave.
+const remoteAudioElements = new Map<string, HTMLAudioElement>();
+
+function attachRemoteAudio(participantId: string, track: MediaStreamTrack) {
+  // Reuse existing element for this participant if it exists
+  let audioEl = remoteAudioElements.get(participantId);
+  if (!audioEl) {
+    audioEl = document.createElement("audio");
+    audioEl.autoplay = true;
+    audioEl.setAttribute("playsinline", "true"); // required on iOS
+    document.body.appendChild(audioEl);
+    remoteAudioElements.set(participantId, audioEl);
+  }
+  const stream = new MediaStream([track]);
+  audioEl.srcObject = stream;
+  audioEl.play().catch(err => console.warn("[Audio] play failed:", err));
+}
+
+function removeRemoteAudio(participantId: string) {
+  const audioEl = remoteAudioElements.get(participantId);
+  if (audioEl) {
+    audioEl.srcObject = null;
+    audioEl.remove();
+    remoteAudioElements.delete(participantId);
+  }
+}
+
+function removeAllRemoteAudio() {
+  remoteAudioElements.forEach((el, id) => removeRemoteAudio(id));
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // MAIN COMPONENT
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -253,34 +293,29 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
     dim:  dark ? "#30304a" : "#c0c0d8",
   };
 
-  const [phase,        setPhase]        = useState<CallPhase>("init");
-  const [callId,       setCallId]       = useState<string | null>(null);
-  const [callData,     setCallData]     = useState<CallData | null>(null);
-  const [muted,        setMuted]        = useState(false);
-  const [error,        setError]        = useState("");
-  const [lastQueuePos, setLastQueuePos] = useState<number | null>(null);
+  const [phase,           setPhase]           = useState<CallPhase>("init");
+  const [callId,          setCallId]          = useState<string | null>(null);
+  const [callData,        setCallData]        = useState<CallData | null>(null);
+  const [muted,           setMuted]           = useState(false);
+  const [error,           setError]           = useState("");
+  const [lastQueuePos,    setLastQueuePos]    = useState<number | null>(null);
   const [greetingStarted, setGreetingStarted] = useState(false);
 
-  const callObj       = useRef<DailyCall | null>(null);
-  const jingleRef     = useRef<HTMLAudioElement | null>(null);
-  const dailyJoined   = useRef(false);
-  const phaseRef      = useRef<CallPhase>("init");
-  const callTimer     = useCallTimer(phase === "active");
+  const callObj     = useRef<DailyCall | null>(null);
+  const jingleRef   = useRef<HTMLAudioElement | null>(null);
+  const dailyJoined = useRef(false);
+  const phaseRef    = useRef<CallPhase>("init");
+  const callTimer   = useCallTimer(phase === "active");
 
-  // ── THE FIX: this ref is shared between greeting loop and endCall ──────────
-  // When user cancels, we set this to true — speakAll() checks it before
-  // every sentence and stops immediately. Speech also gets hard-cancelled.
   const speechCancelled = useRef(false);
 
   useEffect(() => { phaseRef.current = phase; }, [phase]);
 
-  // ── stopAllSpeech — call this any time you want silence immediately ─────────
   const stopAllSpeech = useCallback(() => {
     speechCancelled.current = true;
     try { window.speechSynthesis?.cancel(); } catch { /**/ }
   }, []);
 
-  // ── Queue speech ────────────────────────────────────────────────────────────
   const buildQueueSpeech = (pos: number) => {
     const mins = Math.max(1, pos);
     return (
@@ -290,7 +325,6 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
     );
   };
 
-  // ── Jingle controls ─────────────────────────────────────────────────────────
   const startJingle = useCallback(async () => {
     if (jingleRef.current) return;
     const audio = await createJingle();
@@ -342,8 +376,6 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     if (phase !== "greeting" || greetingStarted) return;
     setGreetingStarted(true);
-
-    // Reset cancel flag for this new greeting session
     speechCancelled.current = false;
 
     const runGreeting = async () => {
@@ -364,7 +396,8 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
         const pos  = callData?.queuePosition ?? 1;
         const mins = Math.max(1, pos);
 
-        // Pass speechCancelled ref — loop stops the moment user cancels
+        // Note: we say "Swift Naija" directly here — no ambiguous "9ja"
+        // toSpeakableText() inside speak() will catch any that slip through
         await speakAll([
           `${tod}! Welcome to Swift Naija Customer Support.`,
           "Please note that this call is being recorded for quality assurance and training purposes.",
@@ -380,7 +413,6 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
         console.error("[Greeting]", e);
       } finally {
         clearTimeout(overallCap);
-        // Only move to waiting if not cancelled
         if (!speechCancelled.current) {
           setPhase("waiting");
           startJingle();
@@ -462,13 +494,52 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
         const call = DailyIframe.createCallObject({
           audioSource: true,
           videoSource: false,
+          // FIX 2a: Tell Daily to subscribe to all remote tracks automatically.
+          // Without this, on mobile the remote audio track is received but
+          // never played — you're connected but hear nothing.
+          subscribeToTracksAutomatically: true,
         });
         callObj.current = call;
+
+        // FIX 2b: Listen for remote participant audio tracks and play them.
+        // Daily fires track-started when a remote track becomes available.
+        // We create an <audio> element and attach the track's MediaStream to it.
+        call.on("track-started", (event) => {
+          if (!event?.participant || event.participant.local) return;
+          if (event.track?.kind !== "audio") return;
+          console.log("[Daily] Remote audio track started:", event.participant.session_id);
+          attachRemoteAudio(event.participant.session_id, event.track);
+        });
+
+        // FIX 2c: Clean up audio elements when a participant leaves or track stops
+        call.on("track-stopped", (event) => {
+          if (!event?.participant || event.participant.local) return;
+          if (event.track?.kind !== "audio") return;
+          removeRemoteAudio(event.participant.session_id);
+        });
+
+        call.on("participant-left", (event) => {
+          if (event?.participant) {
+            removeRemoteAudio(event.participant.session_id);
+          }
+        });
 
         call.on("joined-meeting", () => {
           dailyJoined.current = true;
           speechCancelled.current = false;
           setPhase("active");
+
+          // FIX 2d: Also attach any tracks that were already present when we joined
+          // (race condition: track-started may fire before joined-meeting for some participants)
+          const participants = call.participants();
+          Object.values(participants).forEach((p) => {
+            if (p.local) return;
+            const audioTrack = p.tracks?.audio?.persistentTrack;
+            if (audioTrack && audioTrack.readyState === "live") {
+              attachRemoteAudio(p.session_id, audioTrack);
+            }
+          });
+
           setTimeout(() =>
             speak("You are now connected to a Swift Naija support agent. How can we help you today?"),
           800);
@@ -479,6 +550,7 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
             dailyJoined.current = false;
             stopJingle();
             stopAllSpeech();
+            removeAllRemoteAudio();
             setPhase("rating");
             cleanupDaily();
           }
@@ -487,6 +559,7 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
         call.on("error", () => {
           setError("Connection error. Please try again.");
           setPhase("error");
+          removeAllRemoteAudio();
           cleanupDaily();
         });
 
@@ -519,6 +592,7 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
       stopJingle();
       stopAllSpeech();
       cleanupDaily();
+      removeAllRemoteAudio();
     };
   }, []);
 
@@ -531,9 +605,9 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
   }, [muted]);
 
   const endCall = useCallback(async () => {
-    // Stop ALL speech and jingle immediately — first thing
     stopAllSpeech();
     stopJingle();
+    removeAllRemoteAudio();
     cleanupDaily();
 
     if (callId) {
@@ -580,7 +654,7 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
 
   const phaseTitle: Record<CallPhase, string> = {
     init:       "Setting up your call…",
-    greeting:   "Welcome to Swift9ja Support",
+    greeting:   "Welcome to Swift Naija Support",
     waiting:    "You are in the queue",
     connecting: "Connecting to agent…",
     active:     `Connected to ${callData?.agentName ?? "Support"}`,
@@ -599,7 +673,7 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
     connecting: "Please wait a moment…",
     active:     callTimer,
     hold:       "Your agent will be back shortly…",
-    ended:      "Thank you for contacting Swift9ja support.",
+    ended:      "Thank you for contacting Swift Naija support.",
     rating:     "",
     error:      error,
   };
@@ -729,7 +803,7 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
             }}>
               <RiTimeLine size={18} color="#F59E0B" />
               <span style={{ fontSize: 14, fontWeight: 700, color: c.txt }}>
-                🎵 Hold music is playing…
+                Hold music is playing
               </span>
             </div>
           )}
