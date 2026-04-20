@@ -31,18 +31,21 @@ interface CallData {
   customerToken?: string;
 }
 
-// ── FIX 1: Always convert to the spoken form "Swift Naija" BEFORE TTS ────────
-// Mobile TTS engines (especially on Android/iOS) have no idea what "9ja" is
-// and will phonetically mangle it. We replace it at the text level before
-// any speak() call so the engine only ever sees real words.
+// ── TTS-only phonetic replacement ────────────────────────────────────────────
+// The brand name "swift9ja" is kept in all UI text exactly as-is.
+// Only the string fed to the speech engine gets swapped for a phonetic
+// spelling that mobile TTS engines (Chrome Android, Safari iOS) can say
+// correctly. "Nahja" is the spelling that reads closest to the Nigerian
+// "Naija" (NAH-ja) on both Google TTS and Apple TTS without sounding like
+// "Nay-ja" or "Nigh-ja" which "Naija" produces on most mobile engines.
 function toSpeakableText(text: string): string {
   return text
-    // Catch every known variant of the brand name
-    .replace(/swift\s*9ja/gi,  "Swift Naija")
-    .replace(/swiftnija/gi,    "Swift Naija")
-    .replace(/swift9ja/gi,     "Swift Naija")
-    .replace(/swift\s*nija/gi, "Swift Naija")
-    .replace(/swiftnaija/gi,   "Swift Naija");
+    .replace(/swift\s*9ja/gi,  "Swift Nahja")
+    .replace(/swift9ja/gi,     "Swift Nahja")
+    .replace(/swift\s*nija/gi, "Swift Nahja")
+    .replace(/swiftnija/gi,    "Swift Nahja")
+    .replace(/swift\s*naija/gi,"Swift Nahja")
+    .replace(/swiftnaija/gi,   "Swift Nahja");
 }
 
 // ── speak() — guaranteed to resolve, never hangs ─────────────────────────────
@@ -396,10 +399,10 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
         const pos  = callData?.queuePosition ?? 1;
         const mins = Math.max(1, pos);
 
-        // Note: we say "Swift Naija" directly here — no ambiguous "9ja"
-        // toSpeakableText() inside speak() will catch any that slip through
+        // toSpeakableText() inside speak() converts "swift9ja" to the
+        // correct phonetic form before the engine ever sees it
         await speakAll([
-          `${tod}! Welcome to Swift Naija Customer Support.`,
+          `${tod}! Welcome to swift9ja Customer Support.`,
           "Please note that this call is being recorded for quality assurance and training purposes.",
           `You are number ${pos} in the queue.`,
           `Your estimated wait time is approximately ${mins} ${mins === 1 ? "minute" : "minutes"}.`,
@@ -541,7 +544,7 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
           });
 
           setTimeout(() =>
-            speak("You are now connected to a Swift Naija support agent. How can we help you today?"),
+            speak("You are now connected to a swift9ja support agent. How can we help you today?"),
           800);
         });
 
@@ -654,7 +657,7 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
 
   const phaseTitle: Record<CallPhase, string> = {
     init:       "Setting up your call…",
-    greeting:   "Welcome to Swift Naija Support",
+    greeting:   "Welcome to swift9ja Support",
     waiting:    "You are in the queue",
     connecting: "Connecting to agent…",
     active:     `Connected to ${callData?.agentName ?? "Support"}`,
@@ -673,7 +676,7 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
     connecting: "Please wait a moment…",
     active:     callTimer,
     hold:       "Your agent will be back shortly…",
-    ended:      "Thank you for contacting Swift Naija support.",
+    ended:      "Thank you for contacting swift9ja support.",
     rating:     "",
     error:      error,
   };
