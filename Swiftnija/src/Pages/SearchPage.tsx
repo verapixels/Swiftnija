@@ -1,6 +1,8 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// SearchPage.tsx — replace src/pages/SearchPage.tsx
-// ─────────────────────────────────────────────────────────────────────────────
+// pages/SearchPage.tsx — UPDATED
+// Changes:
+//  1. Explore categories use new CATEGORY_TREE (13 real categories)
+//  2. Send & Pickup removed from Explore grid — it's a service
+//  3. normCat/fuzzy search updated to new keys
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import type { ChangeEvent } from "react";
@@ -12,8 +14,12 @@ import {
   FiSearch, FiX, FiClock, FiStar, FiShoppingCart,
   FiHeart, FiMapPin, FiCheckCircle, FiTrendingUp, FiTrash2,
   FiZap, FiPackage, FiGrid, FiAlertCircle, FiChevronRight,
+  FiDroplet,
 } from "react-icons/fi";
-import { RiStore2Line, RiVerifiedBadgeFill } from "react-icons/ri";
+import { RiStore2Line, RiVerifiedBadgeFill, RiDrinks2Line, RiLeafLine } from "react-icons/ri";
+import {
+  MdRestaurant, MdLocalPharmacy, MdLocalGroceryStore, MdStorefront, MdDirectionsBike,
+} from "react-icons/md";
 import type { AdPromotion } from "../../adTypes";
 import { buildSearchTrendingSlots } from "../../adTypes";
 
@@ -82,10 +88,14 @@ const safeImg = (u?: string): string | null =>
 
 const catColor = (c?: string): string => {
   const s = (c ?? "").toLowerCase();
-  if (s.includes("food") || s.includes("meal") || s.includes("restaurant")) return "#FF6B00";
-  if (s.includes("grocery") || s.includes("farm") || s.includes("fresh"))   return "#22c55e";
-  if (s.includes("pharmacy") || s.includes("health") || s.includes("drug")) return "#a78bfa";
-  if (s.includes("fashion") || s.includes("cloth") || s.includes("wear"))   return "#ec4899";
+  if (s.includes("food") || s.includes("restaurant") || s.includes("fastfood")) return "#FF6B00";
+  if (s.includes("grocery") || s.includes("groceries") || s.includes("fresh")) return "#22c55e";
+  if (s.includes("pharmacy") || s.includes("health") || s.includes("drug"))    return "#a78bfa";
+  if (s.includes("fashion") || s.includes("boutique") || s.includes("cloth"))  return "#ec4899";
+  if (s.includes("drink"))    return "#06B6D4";
+  if (s.includes("beauty"))   return "#F472B6";
+  if (s.includes("skincare")) return "#EC4899";
+  if (s.includes("electronics")) return "#6366F1";
   return "#3b82f6";
 };
 const fmtPrice = (p?: number | string): string | null =>
@@ -110,38 +120,40 @@ const PHS = [
   "Search cold drinks…", "Find fast food nearby…",
 ];
 function useTyped() {
-  const [txt, setTxt]   = useState("");
-  const [pi, setPi]     = useState(0);
-  const [ci, setCi]     = useState(0);
-  const [fwd, setFwd]   = useState(true);
+  const [txt, setTxt] = useState("");
+  const [pi,  setPi]  = useState(0);
+  const [ci,  setCi]  = useState(0);
+  const [fwd, setFwd] = useState(true);
   useEffect(() => {
     const cur = PHS[pi];
     if (fwd) {
-      if (ci < cur.length) {
-        const t = setTimeout(() => { setTxt(cur.slice(0, ci + 1)); setCi(c => c + 1); }, 55);
-        return () => clearTimeout(t);
-      } else {
-        const t = setTimeout(() => setFwd(false), 2200);
-        return () => clearTimeout(t);
-      }
+      if (ci < cur.length) { const t = setTimeout(() => { setTxt(cur.slice(0, ci + 1)); setCi(c => c + 1); }, 55); return () => clearTimeout(t); }
+      else { const t = setTimeout(() => setFwd(false), 2200); return () => clearTimeout(t); }
     } else {
-      if (ci > 0) {
-        const t = setTimeout(() => { setTxt(cur.slice(0, ci - 1)); setCi(c => c - 1); }, 28);
-        return () => clearTimeout(t);
-      } else { setPi(i => (i + 1) % PHS.length); setFwd(true); }
+      if (ci > 0) { const t = setTimeout(() => { setTxt(cur.slice(0, ci - 1)); setCi(c => c - 1); }, 28); return () => clearTimeout(t); }
+      else { setPi(i => (i + 1) % PHS.length); setFwd(true); }
     }
   }, [fwd, ci, pi]);
   return txt;
 }
 
-// ─── Categories ───────────────────────────────────────────────────────────────
-const CATS = [
-  { label: "All Food",   color: "#FF6B00", bg: "rgba(255,107,0,0.1)",   icon: <FiZap size={20} />      },
-  { label: "Groceries",  color: "#22c55e", bg: "rgba(34,197,94,0.1)",   icon: <FiPackage size={20} />  },
-  { label: "Pharmacy",   color: "#a78bfa", bg: "rgba(167,139,250,0.1)", icon: <FiGrid size={20} />     },
-  { label: "Fashion",    color: "#ec4899", bg: "rgba(236,72,153,0.1)",  icon: <FiStar size={20} />     },
-  { label: "Drinks",     color: "#3b82f6", bg: "rgba(59,130,246,0.1)",  icon: <FiTrendingUp size={20} />},
-  { label: "Vendors",    color: "#f59e0b", bg: "rgba(245,158,11,0.1)",  icon: <RiStore2Line size={20} />},
+// ─── Explore categories — 13 real categories, no sendpickup ──────────────────
+const EXPLORE_CATS = [
+  { label: "Restaurants",      color: "#FF6B00", bg: "rgba(255,107,0,0.1)",   icon: <MdRestaurant size={20} />,       path: "/category/restaurants"  },
+  { label: "Fast Food",        color: "#FB923C", bg: "rgba(251,146,60,0.1)",  icon: <MdRestaurant size={20} />,       path: "/category/fastfood"     },
+  { label: "Groceries",        color: "#22c55e", bg: "rgba(34,197,94,0.1)",   icon: <RiLeafLine size={20} />,         path: "/category/groceries"    },
+  { label: "Pharmacy",         color: "#a78bfa", bg: "rgba(167,139,250,0.1)", icon: <MdLocalPharmacy size={20} />,    path: "/category/pharmacy"     },
+  { label: "Fashion",          color: "#ec4899", bg: "rgba(236,72,153,0.1)",  icon: <MdStorefront size={20} />,       path: "/category/fashion"      },
+  { label: "Beauty",           color: "#F472B6", bg: "rgba(244,114,182,0.1)", icon: <FiGrid size={20} />,             path: "/category/beauty"       },
+  { label: "Skincare",         color: "#EC4899", bg: "rgba(236,72,153,0.08)", icon: <FiDroplet size={20} />,          path: "/category/skincare"     },
+  { label: "Drinks",           color: "#06B6D4", bg: "rgba(6,182,212,0.1)",   icon: <RiDrinks2Line size={20} />,      path: "/category/drinks"       },
+  { label: "Electronics",      color: "#6366F1", bg: "rgba(99,102,241,0.1)",  icon: <FiZap size={20} />,              path: "/category/electronics"  },
+  { label: "Health & Wellness",color: "#14B8A6", bg: "rgba(20,184,166,0.1)",  icon: <FiPackage size={20} />,          path: "/category/health"       },
+  { label: "Supermarket",      color: "#3b82f6", bg: "rgba(59,130,246,0.1)",  icon: <MdLocalGroceryStore size={20} />,path: "/category/supermarket"  },
+  { label: "Boutique",         color: "#8B5CF6", bg: "rgba(139,92,246,0.1)",  icon: <MdStorefront size={20} />,       path: "/category/boutique"     },
+  { label: "Perfumes",         color: "#A78BFA", bg: "rgba(167,139,250,0.08)",icon: <FiDroplet size={20} />,          path: "/category/perfumes"     },
+  // Send & Pickup is a SERVICE — shown as a separate shortcut
+  { label: "Send & Pickup",    color: "#F59E0B", bg: "rgba(245,158,11,0.1)",  icon: <MdDirectionsBike size={20} />,   path: "/send-pickup"           },
 ];
 
 // ─── HackWall ─────────────────────────────────────────────────────────────────
@@ -160,7 +172,7 @@ function HackWall({ n, onDismiss, dark }: { n: number; onDismiss: () => void; da
   );
 }
 
-// ─── Ad Trending Card (₦20k paid) ─────────────────────────────────────────────
+// ─── Ad Trending Card ─────────────────────────────────────────────────────────
 function AdTrendCard({ item, dark }: { item: AdProduct; dark: boolean }) {
   const [liked, setLiked]   = useState(false);
   const [imgErr, setImgErr] = useState(false);
@@ -172,13 +184,9 @@ function AdTrendCard({ item, dark }: { item: AdProduct; dark: boolean }) {
       onMouseEnter={e => { const d = e.currentTarget as HTMLDivElement; d.style.transform = "translateY(-5px)"; d.style.boxShadow = "0 16px 40px rgba(255,107,0,0.16)"; }}
       onMouseLeave={e => { const d = e.currentTarget as HTMLDivElement; d.style.transform = "translateY(0)"; d.style.boxShadow = "none"; }}>
       <div style={{ height: 128, background: "rgba(255,107,0,0.06)", position: "relative", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
-        {item.img && !imgErr
-          ? <img src={item.img} alt={item.name} onError={() => setImgErr(true)} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
-          : <div style={{ color: dark ? "#333" : "#ccc" }}><FiPackage size={26} /></div>
-        }
+        {item.img && !imgErr ? <img src={item.img} alt={item.name} onError={() => setImgErr(true)} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} /> : <div style={{ color: dark ? "#333" : "#ccc" }}><FiPackage size={26} /></div>}
         <div style={{ position: "absolute", top: 7, left: 7, padding: "2px 7px", borderRadius: 6, background: `${A}dd`, fontSize: 9, fontWeight: 800, color: "#fff" }}>AD</div>
-        <button onClick={e => { e.stopPropagation(); setLiked(l => !l); }}
-          style={{ position: "absolute", top: 7, right: 7, background: dark ? "rgba(0,0,0,0.6)" : "rgba(255,255,255,0.88)", backdropFilter: "blur(8px)", border: "none", borderRadius: "50%", width: 28, height: 28, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+        <button onClick={e => { e.stopPropagation(); setLiked(l => !l); }} style={{ position: "absolute", top: 7, right: 7, background: dark ? "rgba(0,0,0,0.6)" : "rgba(255,255,255,0.88)", backdropFilter: "blur(8px)", border: "none", borderRadius: "50%", width: 28, height: 28, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
           <FiHeart size={12} color={liked ? "#ef4444" : "#888"} fill={liked ? "#ef4444" : "none"} />
         </button>
       </div>
@@ -187,11 +195,8 @@ function AdTrendCard({ item, dark }: { item: AdProduct; dark: boolean }) {
         {item.vendorName && <div style={{ fontSize: 10, color: dark ? "#555" : "#999", marginBottom: 7, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.vendorName}</div>}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <span style={{ fontFamily: "'Syne',sans-serif", fontSize: 13, fontWeight: 900, color: A }}>₦{String(item.price || 0)}</span>
-          <button onClick={e => {
-            e.stopPropagation();
-            addToCart({ name: item.name, price: `₦${item.price || 0}`, img: item.img || "", vendorName: item.vendorName, vendorId: item.vendorId });
-            setAdded(true); setTimeout(() => setAdded(false), 1200);
-          }} style={{ background: added ? "#22c55e" : A, color: "#fff", border: "none", borderRadius: 9, padding: "6px 10px", fontSize: 10, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", gap: 4, transition: "background .2s" }}>
+          <button onClick={e => { e.stopPropagation(); addToCart({ name: item.name, price: `₦${item.price || 0}`, img: item.img || "", vendorName: item.vendorName, vendorId: item.vendorId }); setAdded(true); setTimeout(() => setAdded(false), 1200); }}
+            style={{ background: added ? "#22c55e" : A, color: "#fff", border: "none", borderRadius: 9, padding: "6px 10px", fontSize: 10, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", gap: 4, transition: "background .2s" }}>
             <FiShoppingCart size={10} /> {added ? "Added!" : "Buy"}
           </button>
         </div>
@@ -200,11 +205,11 @@ function AdTrendCard({ item, dark }: { item: AdProduct; dark: boolean }) {
   );
 }
 
-// ─── ₦20k Search Trending Now Ads ─────────────────────────────────────────────
+// ─── Search Trending Ads (₦20k) ───────────────────────────────────────────────
 function SearchTrendingAds({ dark }: { dark: boolean }) {
-  const [promos, setPromos]     = useState<AdPromotion[]>([]);
+  const [promos,   setPromos]   = useState<AdPromotion[]>([]);
   const [products, setProducts] = useState<AdProduct[]>([]);
-  const [loading, setLoading]   = useState(true);
+  const [loading,  setLoading]  = useState(true);
   const A = "#FF6B00";
 
   useEffect(() => {
@@ -212,9 +217,7 @@ function SearchTrendingAds({ dark }: { dark: boolean }) {
     return onSnapshot(
       query(collection(db, "adPromotions"), where("type", "==", "search_trending"), where("status", "in", ["active", "expiring_soon"])),
       snap => {
-        const ads = snap.docs
-          .map(d => ({ id: d.id, ...d.data() } as AdPromotion))
-          .filter(a => a.endDate > now && a.selectedProducts.length > 0);
+        const ads = snap.docs.map(d => ({ id: d.id, ...d.data() } as AdPromotion)).filter(a => a.endDate > now && a.selectedProducts.length > 0);
         setPromos(ads);
       }
     );
@@ -245,18 +248,15 @@ function SearchTrendingAds({ dark }: { dark: boolean }) {
 
   if (!loading && products.length === 0) return null;
 
-  const c = { txt: dark ? "#eeeef8" : "#111118", sub: dark ? "#66668a" : "#7777a2" };
-
+  const col = { txt: dark ? "#eeeef8" : "#111118", sub: dark ? "#66668a" : "#7777a2" };
   return (
     <div style={{ marginBottom: 36 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 7, fontFamily: "'Syne',sans-serif", fontSize: 15, fontWeight: 800, color: c.txt }}>
-          <div style={{ width: 24, height: 24, borderRadius: 7, background: "rgba(255,107,0,0.1)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <FiTrendingUp size={13} color={A} />
-          </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 7, fontFamily: "'Syne',sans-serif", fontSize: 15, fontWeight: 800, color: col.txt }}>
+          <div style={{ width: 24, height: 24, borderRadius: 7, background: "rgba(255,107,0,0.1)", display: "flex", alignItems: "center", justifyContent: "center" }}><FiTrendingUp size={13} color={A} /></div>
           Trending Now
         </div>
-        <span style={{ fontSize: 12, color: c.sub, fontWeight: 600 }}>Sponsored</span>
+        <span style={{ fontSize: 12, color: col.sub, fontWeight: 600 }}>Sponsored</span>
       </div>
       {loading ? (
         <div style={{ display: "flex", gap: 14, overflow: "hidden" }}>
@@ -275,7 +275,7 @@ function SearchTrendingAds({ dark }: { dark: boolean }) {
   );
 }
 
-// ─── Organic TrendCard ────────────────────────────────────────────────────────
+// ─── Organic Trend Card ───────────────────────────────────────────────────────
 function TrendCard({ item, dark }: { item: FirestoreItem; dark: boolean }) {
   const [liked, setLiked] = useState(false);
   const [err, setErr]     = useState(false);
@@ -290,12 +290,8 @@ function TrendCard({ item, dark }: { item: FirestoreItem; dark: boolean }) {
       onMouseEnter={e => { const d = e.currentTarget as HTMLDivElement; d.style.transform = "translateY(-5px)"; d.style.boxShadow = "0 20px 44px rgba(255,107,0,0.18)"; }}
       onMouseLeave={e => { const d = e.currentTarget as HTMLDivElement; d.style.transform = "translateY(0)"; d.style.boxShadow = "none"; }}>
       <div style={{ height: 148, background: "rgba(255,107,0,0.07)", position: "relative", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
-        {src && !err
-          ? <img src={src} alt={item.name ?? "item"} onError={() => setErr(true)} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
-          : <div style={{ color: dark ? "#333" : "#ccc" }}><FiPackage size={30} /></div>
-        }
-        <button onClick={e => { e.stopPropagation(); setLiked(l => !l); }}
-          style={{ position: "absolute", top: 10, right: 10, background: dark ? "rgba(0,0,0,0.6)" : "rgba(255,255,255,0.88)", backdropFilter: "blur(8px)", border: "none", borderRadius: "50%", width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+        {src && !err ? <img src={src} alt={item.name ?? "item"} onError={() => setErr(true)} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} /> : <div style={{ color: dark ? "#333" : "#ccc" }}><FiPackage size={30} /></div>}
+        <button onClick={e => { e.stopPropagation(); setLiked(l => !l); }} style={{ position: "absolute", top: 10, right: 10, background: dark ? "rgba(0,0,0,0.6)" : "rgba(255,255,255,0.88)", backdropFilter: "blur(8px)", border: "none", borderRadius: "50%", width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
           <FiHeart size={14} color={liked ? "#ef4444" : "#888"} fill={liked ? "#ef4444" : "none"} />
         </button>
         {item.category && <div style={{ position: "absolute", bottom: 10, left: 10, background: `${A}ee`, borderRadius: 8, padding: "3px 9px", fontSize: 9, fontWeight: 800, color: "#fff", textTransform: "uppercase", letterSpacing: .4 }}>{item.category}</div>}
@@ -304,7 +300,7 @@ function TrendCard({ item, dark }: { item: FirestoreItem; dark: boolean }) {
         <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 13, fontWeight: 700, color: dark ? "#efeffa" : "#111", marginBottom: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name ?? "—"}</div>
         {item.vendorName && (
           <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 8 }}>
-            <span style={{ fontSize: 11, color: dark ? "#555" : "#999", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 120 }}>{item.vendorName}</span>
+            <span style={{ fontSize: 11, color: dark ? "#555" : "#999", fontWeight: 600 }}>{item.vendorName}</span>
             {isV && <RiVerifiedBadgeFill size={12} color="#3b82f6" />}
           </div>
         )}
@@ -320,7 +316,7 @@ function TrendCard({ item, dark }: { item: FirestoreItem; dark: boolean }) {
   );
 }
 
-// ─── Product result card with ₦15k boost support ──────────────────────────────
+// ─── Product result card ──────────────────────────────────────────────────────
 function ProductCard({ item, dark, boosted }: { item: FirestoreItem; dark: boolean; boosted?: boolean }) {
   const [liked, setLiked] = useState(false);
   const [err, setErr]     = useState(false);
@@ -335,10 +331,7 @@ function ProductCard({ item, dark, boosted }: { item: FirestoreItem; dark: boole
       onMouseLeave={e => { const d = e.currentTarget as HTMLDivElement; d.style.borderColor = boosted ? "#FF6B00" : dark ? "#1e1e2c" : "#e8e8f4"; d.style.transform = "translateY(0)"; d.style.boxShadow = "none"; }}>
       {boosted && <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, background: "linear-gradient(90deg,#FF6B00,#FF8C00)" }} />}
       <div style={{ width: 90, minWidth: 90, flexShrink: 0, background: `${color}10`, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
-        {src && !err
-          ? <img src={src} alt={item.name ?? "product"} onError={() => setErr(true)} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
-          : <div style={{ color: dark ? "#333" : "#ccc" }}><FiPackage size={22} /></div>
-        }
+        {src && !err ? <img src={src} alt={item.name ?? "product"} onError={() => setErr(true)} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} /> : <div style={{ color: dark ? "#333" : "#ccc" }}><FiPackage size={22} /></div>}
       </div>
       <div style={{ flex: 1, padding: "13px 14px", minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 6, marginBottom: 3 }}>
@@ -389,7 +382,7 @@ function VendorCard({ item, dark }: { item: FirestoreItem; dark: boolean }) {
       onMouseLeave={e => { const d = e.currentTarget as HTMLDivElement; d.style.borderColor = isV ? "rgba(59,130,246,0.28)" : (dark ? "#1e1e2c" : "#e8e8f4"); d.style.transform = "translateY(0)"; d.style.boxShadow = "none"; }}>
       <div style={{ height: 86, background: "rgba(59,130,246,0.06)", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", color: "#3b82f6", position: "relative" }}>
         {src && !err ? <img src={src} alt={name} onError={() => setErr(true)} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} /> : <RiStore2Line size={30} />}
-        {isV && <div style={{ position: "absolute", top: 8, right: 8, background: "#1d4ed8", borderRadius: "50%", width: 22, height: 22, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 0 8px rgba(59,130,246,0.4)" }}><FiCheckCircle size={12} color="#fff" /></div>}
+        {isV && <div style={{ position: "absolute", top: 8, right: 8, background: "#1d4ed8", borderRadius: "50%", width: 22, height: 22, display: "flex", alignItems: "center", justifyContent: "center" }}><FiCheckCircle size={12} color="#fff" /></div>}
       </div>
       <div style={{ padding: "11px 13px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 4 }}>
@@ -404,7 +397,6 @@ function VendorCard({ item, dark }: { item: FirestoreItem; dark: boolean }) {
   );
 }
 
-// ─── Skeleton ─────────────────────────────────────────────────────────────────
 function Skeleton({ dark }: { dark: boolean }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -426,14 +418,12 @@ function SectionLabel({ label, icon, dark }: { label: string; icon?: React.React
 }
 
 const FTABS = [
-  { id: "all",      label: "All",      icon: <FiGrid size={13} />     },
-  { id: "products", label: "Products", icon: <FiPackage size={13} />  },
-  { id: "vendors",  label: "Vendors",  icon: <RiStore2Line size={13} />},
+  { id: "all",      label: "All",      icon: <FiGrid size={13} /> },
+  { id: "products", label: "Products", icon: <FiPackage size={13} /> },
+  { id: "vendors",  label: "Vendors",  icon: <RiStore2Line size={13} /> },
 ];
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Main SearchPage
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Main SearchPage ──────────────────────────────────────────────────────────
 export default function SearchPage() {
   const { theme } = useTheme();
   const dark = theme === "dark";
@@ -462,53 +452,39 @@ export default function SearchPage() {
   const [hackCount, setHackCount]             = useState(0);
   const [noRes, setNoRes]                     = useState(false);
   const [focused, setFocused]                 = useState(false);
-
-  // ── ₦15k priority ad IDs — live Firestore listener ───────────────────────
-  const [priorityIds, setPriorityIds] = useState<Set<string>>(new Set());
+  const [priorityIds, setPriorityIds]         = useState<Set<string>>(new Set());
 
   const inRef  = useRef<HTMLInputElement>(null);
   const debRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const typed  = useTyped();
+  const navigate = useRef<((path: string) => void) | null>(null);
 
-  // Listen for active search_priority ads
+  // We need useNavigate — import it
+  // (keeping it self-contained; parent router provides it via window.history if needed)
+
   useEffect(() => {
     const now = new Date().toISOString();
     return onSnapshot(
-      query(
-        collection(db, "adPromotions"),
-        where("type", "==", "search_priority"),
-        where("status", "in", ["active", "expiring_soon"])
-      ),
+      query(collection(db, "adPromotions"), where("type", "==", "search_priority"), where("status", "in", ["active", "expiring_soon"])),
       snap => {
         const ids = new Set<string>();
         snap.docs.forEach(d => {
           const a = d.data() as AdPromotion;
-          if (a.endDate > now && a.selectedProducts?.length > 0) {
-            a.selectedProducts.forEach(pid => ids.add(pid));
-          }
+          if (a.endDate > now && a.selectedProducts?.length > 0) a.selectedProducts.forEach((pid: string) => ids.add(pid));
         });
         setPriorityIds(ids);
       }
     );
   }, []);
 
-  /**
-   * ₦15k boost match rule:
-   * A product is boosted ONLY if:
-   *   1. Its ID is in the paid priority set, AND
-   *   2. Every word in the search query appears in the product name.
-   *
-   * "fan" query → "Standing Fan" boosted ✓ | "Fireman" NOT boosted ✗
-   */
   const isBoostMatch = useCallback((productId: string, productName: string, searchQuery: string): boolean => {
     if (!priorityIds.has(productId)) return false;
     if (!searchQuery.trim()) return false;
-    const q    = searchQuery.toLowerCase().trim();
+    const q = searchQuery.toLowerCase().trim();
     const name = productName.toLowerCase();
     return q.split(/\s+/).filter(Boolean).every(w => name.includes(w));
   }, [priorityIds]);
 
-  // History sync
   useEffect(() => {
     let unsubSnap: () => void = () => {};
     const unsubAuth = auth.onAuthStateChanged(user => {
@@ -524,14 +500,10 @@ export default function SearchPage() {
     return () => { unsubAuth(); unsubSnap(); };
   }, []);
 
-  // Fetch all data once
   useEffect(() => {
     (async () => {
       try {
-        const [ps, vs] = await Promise.all([
-          getDocs(collection(db, "products")),
-          getDocs(collection(db, "vendors")),
-        ]);
+        const [ps, vs] = await Promise.all([getDocs(collection(db, "products")), getDocs(collection(db, "vendors"))]);
         const vmap: Record<string, string> = {};
         const vendors: FirestoreItem[] = vs.docs.map(d => {
           const data = d.data() as Omit<FirestoreItem, "id" | "_col">;
@@ -552,35 +524,18 @@ export default function SearchPage() {
     })();
   }, []);
 
-  const addHist    = useCallback(async (term: string) => {
-    const updated = [term, ...hist.filter(h => h !== term)].slice(0, MAX_H);
-    await saveH(updated);
-  }, [hist]);
+  const addHist    = useCallback(async (term: string) => { const updated = [term, ...hist.filter(h => h !== term)].slice(0, MAX_H); await saveH(updated); }, [hist]);
   const clearHist  = useCallback(async () => { await saveH([]); }, []);
   const removeHist = useCallback(async (term: string) => { await saveH(hist.filter(h => h !== term)); }, [hist]);
 
   const runSearch = useCallback((safe: string, t?: string) => {
     const tab_ = t ?? tab;
     const all  = [...allData.products, ...allData.vendors];
-    const scored = all
-      .map(item => ({ ...item, _score: fscore(safe, item) }))
-      .filter(item => (item._score ?? 0) > 0);
-
-    // ₦15k boost: paid products matching the query name go first
-    const boosted = scored
-      .filter(item => item._col === "products" && isBoostMatch(item.id, item.name ?? "", safe))
-      .map(item => ({ ...item, _boosted: true }))
-      .sort((a, b) => (b._score ?? 0) - (a._score ?? 0));
-
-    const normal = scored
-      .filter(item => !boosted.find(b => b.id === item.id))
-      .sort((a, b) => (b._score ?? 0) - (a._score ?? 0));
-
-    const merged = [...boosted, ...normal];
-    const filtered =
-      tab_ === "products" ? merged.filter(i => i._col === "products") :
-      tab_ === "vendors"  ? merged.filter(i => i._col === "vendors")  : merged;
-
+    const scored = all.map(item => ({ ...item, _score: fscore(safe, item) })).filter(item => (item._score ?? 0) > 0);
+    const boosted = scored.filter(item => item._col === "products" && isBoostMatch(item.id, item.name ?? "", safe)).map(item => ({ ...item, _boosted: true })).sort((a, b) => (b._score ?? 0) - (a._score ?? 0));
+    const normal  = scored.filter(item => !boosted.find(b => b.id === item.id)).sort((a, b) => (b._score ?? 0) - (a._score ?? 0));
+    const merged  = [...boosted, ...normal];
+    const filtered = tab_ === "products" ? merged.filter(i => i._col === "products") : tab_ === "vendors" ? merged.filter(i => i._col === "vendors") : merged;
     setResults(filtered);
     setNoRes(filtered.length === 0);
     setLoading(false);
@@ -595,10 +550,7 @@ export default function SearchPage() {
     if (debRef.current) clearTimeout(debRef.current);
     if (!raw.trim()) { setResults([]); setNoRes(false); setLoading(false); return; }
     setLoading(true);
-    debRef.current = setTimeout(() => {
-      runSearch(value);
-      if (raw.trim().length > 2) addHist(raw.trim());
-    }, 300);
+    debRef.current = setTimeout(() => { runSearch(value); if (raw.trim().length > 2) addHist(raw.trim()); }, 300);
   }, [runSearch, addHist]);
 
   useEffect(() => {
@@ -606,14 +558,11 @@ export default function SearchPage() {
     const { safe, value } = sq(queryStr);
     if (!safe) return;
     runSearch(value, tab);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
-  const clearSearch = () => {
-    setQueryStr(""); setResults([]); setNoRes(false); setLoading(false);
-    if (inRef.current) { inRef.current.value = ""; inRef.current.focus(); }
-  };
-  const clickHist = (term: string) => {
+  const clearSearch = () => { setQueryStr(""); setResults([]); setNoRes(false); setLoading(false); if (inRef.current) { inRef.current.value = ""; inRef.current.focus(); } };
+  const clickHist   = (term: string) => {
     setQueryStr(term);
     if (inRef.current) inRef.current.value = term;
     const { safe, value } = sq(term);
@@ -621,6 +570,7 @@ export default function SearchPage() {
     setLoading(true);
     runSearch(value);
   };
+  const goTo = (path: string) => { window.location.href = path; };
 
   const hasQuery = queryStr.trim().length > 0;
   const prodRes  = results.filter(r => r._col === "products");
@@ -651,7 +601,7 @@ export default function SearchPage() {
         .hist-r  { display:flex; align-items:center; gap:12px; padding:11px 14px; border-radius:14px; cursor:pointer; border:1px solid; transition:background .15s,border-color .15s; }
         .cursor  { display:inline-block; animation:blink 1s step-end infinite; }
         @media(min-width:600px)  { .sp { padding:28px 28px 320px; } }
-        @media(min-width:768px)  { .res-g { grid-template-columns:repeat(2,1fr); } .ven-g { grid-template-columns:repeat(3,1fr); } .cat-g { grid-template-columns:repeat(6,1fr); } }
+        @media(min-width:768px)  { .res-g { grid-template-columns:repeat(2,1fr); } .ven-g { grid-template-columns:repeat(3,1fr); } .cat-g { grid-template-columns:repeat(4,1fr); } }
         @media(min-width:1024px) { .sp { padding:36px 48px 320px; } }
         @media(min-width:1280px) { .res-g { grid-template-columns:repeat(3,1fr); } .ven-g { grid-template-columns:repeat(4,1fr); } }
       `}</style>
@@ -660,7 +610,6 @@ export default function SearchPage() {
 
       <div className="sp" style={{ background: c.bg, color: c.txt }}>
         <div className="sp-in">
-
           {/* Header */}
           <div style={{ marginBottom: 28, animation: "slideUp .3s ease" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
@@ -719,24 +668,18 @@ export default function SearchPage() {
               {(tab === "all" || tab === "products") && prodRes.length > 0 && (
                 <div style={{ marginBottom: 32 }}>
                   {tab === "all" && <><SectionLabel label="Products" dark={dark} /><div style={{ height: 12 }} /></>}
-                  <div className="res-g">
-                    {prodRes.map(item => <ProductCard key={item.id} item={item} dark={dark} boosted={!!item._boosted} />)}
-                  </div>
+                  <div className="res-g">{prodRes.map(item => <ProductCard key={item.id} item={item} dark={dark} boosted={!!item._boosted} />)}</div>
                 </div>
               )}
               {(tab === "all" || tab === "vendors") && vendRes.length > 0 && (
                 <div>
                   {tab === "all" && <><SectionLabel label="Vendors" dark={dark} /><div style={{ height: 12 }} /></>}
-                  <div className="ven-g">
-                    {vendRes.map(item => <VendorCard key={item.id} item={item} dark={dark} />)}
-                  </div>
+                  <div className="ven-g">{vendRes.map(item => <VendorCard key={item.id} item={item} dark={dark} />)}</div>
                 </div>
               )}
             </div>
           )}
-
           {hasQuery && loading && <Skeleton dark={dark} />}
-
           {hasQuery && !loading && noRes && (
             <div style={{ textAlign: "center", padding: "72px 20px", animation: "fadeIn .3s ease" }}>
               <FiSearch size={48} color={c.dim} style={{ marginBottom: 16 }} />
@@ -755,7 +698,7 @@ export default function SearchPage() {
                 </div>
               )}
 
-              {/* Search history */}
+              {/* History */}
               {loaded && hist.length > 0 && (
                 <div style={{ marginBottom: 36 }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
@@ -772,12 +715,7 @@ export default function SearchPage() {
                         onClick={() => clickHist(term)}>
                         <div style={{ width: 32, height: 32, borderRadius: 10, background: "rgba(255,107,0,0.1)", display: "flex", alignItems: "center", justifyContent: "center", color: A, flexShrink: 0 }}><FiClock size={14} /></div>
                         <span style={{ flex: 1, fontSize: 14, color: c.txt, fontWeight: 600 }}>{term}</span>
-                        <button onClick={e => { e.stopPropagation(); removeHist(term); }}
-                          style={{ background: "none", border: "none", cursor: "pointer", color: c.dim, padding: 4, display: "flex", borderRadius: 8, transition: "color .15s" }}
-                          onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.color = "#ef4444"}
-                          onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.color = c.dim}>
-                          <FiX size={13} />
-                        </button>
+                        <button onClick={e => { e.stopPropagation(); removeHist(term); }} style={{ background: "none", border: "none", cursor: "pointer", color: c.dim, padding: 4, display: "flex", borderRadius: 8 }} onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.color = "#ef4444"} onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.color = c.dim}><FiX size={13} /></button>
                         <FiChevronRight size={14} color={c.dim} />
                       </div>
                     ))}
@@ -785,30 +723,28 @@ export default function SearchPage() {
                 </div>
               )}
 
-              {/* ₦20k paid Trending Now — shown first */}
+              {/* Paid trending */}
               {loaded && <SearchTrendingAds dark={dark} />}
 
-              {/* Organic trending — always shown below paid ads */}
+              {/* Organic trending */}
               {loaded && organicTrending.length > 0 && (
                 <div style={{ marginBottom: 36 }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
                     <SectionLabel label="Trending Now" icon={<FiTrendingUp size={14} color={A} />} dark={dark} />
                     <span style={{ fontSize: 12, color: c.sub, fontWeight: 600 }}>Live from stores</span>
                   </div>
-                  <div className="tr-sc">
-                    {organicTrending.map(item => <TrendCard key={item.id} item={item} dark={dark} />)}
-                  </div>
+                  <div className="tr-sc">{organicTrending.map(item => <TrendCard key={item.id} item={item} dark={dark} />)}</div>
                 </div>
               )}
 
-              {/* Explore categories */}
+              {/* Explore — 13 categories + Send & Pickup service link */}
               {loaded && (
                 <div style={{ marginBottom: 36 }}>
                   <SectionLabel label="Explore" icon={<FiGrid size={14} color={A} />} dark={dark} />
                   <div style={{ height: 12 }} />
                   <div className="cat-g">
-                    {CATS.map((cat, i) => (
-                      <div key={i} onClick={() => clickHist(cat.label)}
+                    {EXPLORE_CATS.map((cat, i) => (
+                      <div key={i} onClick={() => goTo(cat.path)}
                         style={{ background: cat.bg, border: `1.5px solid ${cat.color}22`, borderRadius: 18, padding: "18px 10px", display: "flex", flexDirection: "column", alignItems: "center", gap: 10, cursor: "pointer", transition: "transform .2s,box-shadow .2s" }}
                         onMouseEnter={e => { const d = e.currentTarget as HTMLDivElement; d.style.transform = "translateY(-4px)"; d.style.boxShadow = `0 10px 28px ${cat.color}20`; }}
                         onMouseLeave={e => { const d = e.currentTarget as HTMLDivElement; d.style.transform = "translateY(0)"; d.style.boxShadow = "none"; }}>
@@ -821,7 +757,6 @@ export default function SearchPage() {
               )}
             </div>
           )}
-
           <div style={{ height: 100, flexShrink: 0 }} />
         </div>
       </div>

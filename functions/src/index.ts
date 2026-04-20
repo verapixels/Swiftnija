@@ -2609,6 +2609,298 @@ export const reassignStuckOrders = onSchedule("every 2 minutes", async () => {
   }
 });
 
+
+// ─────────────────────────────────────────
+// FUNCTION 28: createSupportCallRoom
+// Add this export to the bottom of your index.ts
+// Requires: DAILY_API_KEY secret
+// Creates a Daily.co audio-only room, writes to Firestore,
+// returns tokens for customer and agent.
+// ─────────────────────────────────────────
+export const createSupportCallRoom = onCall({
+  cors: CORS_ORIGINS,
+  secrets: ["DAILY_API_KEY"],
+}, async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "You must be signed in.");
+
+  const uid = request.auth.uid;
+  const dailyApiKey = process.env.DAILY_API_KEY;
+  if (!dailyApiKey) throw new HttpsError("internal", "DAILY_API_KEY is not configured.");
+
+  const userSnap = await db.collection("users").doc(uid).get();
+  const userData = userSnap.data();
+  const userName: string = userData?.fullName ?? userData?.displayName ?? request.auth.token.email?.split("@")[0] ?? "Customer";
+
+  // Check if customer already has an active call room
+  const existingSnap = await db.collection("supportCalls")
+    .where("customerId", "==", uid)
+    .where("status", "==", "waiting")
+    .limit(1)
+    .get();
+
+  if (!existingSnap.empty) {
+    const existing = existingSnap.docs[0].data();
+    return {
+      success: true,
+      roomName: existing.roomName,
+      roomUrl: existing.roomUrl,
+      customerToken: existing.customerToken,
+      callId: existingSnap.docs[0].id,
+      queuePosition: existing.queuePosition ?? 1,
+    };
+  }
+
+  // Count waiting calls for queue position
+  const waitingSnap = await db.collection("supportCalls")
+    .where("status", "==", "waiting")
+    .get();
+  const queuePosition = waitingSnap.size + 1;
+
+  // Create Daily.co room — audio only, expires in 2 hours
+  const roomName = `swift-support-${uid}-${Date.now()}`;
+  const expiresAt = Math.floor(Date.now() / 1000) + 7200;
+
+  const roomRes = await fetch("https://api.daily.co/v1/rooms", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${dailyApiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      name: roomName,
+      privacy: "private",
+      properties: {
+        exp: expiresAt,
+        enable_chat: false,
+        enable_screenshare: false,
+        enable_recording: "cloud",
+        max_participants: 2,
+        // Audio only — no video
+        enable_video_processing_ui: false,
+        start_video_off: true,
+        start_audio_off: false,
+      },
+    }),
+  });
+
+  if (!roomRes.ok) {
+    const err = await roomRes.text();
+    throw new HttpsError("internal", `Daily.co room creation failed: ${err}`);
+  }
+
+  const roomData = await roomRes.json() as { name: string; url: string };
+
+  // Create customer meeting token
+  const customerTokenRes = await fetch("https://api.daily.co/v1/meeting-tokens", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${dailyApiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      properties: {
+        room_name: roomName,
+        user_name: userName,
+        user_id: uid,
+        exp: expiresAt,
+        is_owner: false,
+        start_video_off: true,
+        start_audio_off: false,
+      },
+    }),
+  });
+
+  if (!customerTokenRes.ok) {
+    const err = await customerTokenRes.text();
+    throw new HttpsError("internal", `Daily.co customer token failed: ${err}`);
+  }
+
+  const customerTokenData = await customerTokenRes.json() as { token: string };
+
+  // Write to Firestore
+  const callRef = await db.collection("supportCalls").add({
+    customerId: uid,
+    customerName: userName,
+    customerEmail: request.auth.token.email ?? "",
+    roomName: roomData.name,
+    roomUrl: roomData.url,
+    customerToken: customerTokenData.token,
+    status: "waiting",
+    queuePosition,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  // Notify admins
+  await db.collection("adminNotifications").add({
+    type: "support_call_waiting",
+    callId: callRef.id,
+    userName,
+    userEmail: request.auth.token.email ?? "",
+    message: `${userName} is waiting for a support call`,
+    read: false,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  console.info(`[createSupportCallRoom] Room created for uid=${uid} callId=${callRef.id}`);
+
+  return {
+    success: true,
+    roomName: roomData.name,
+    roomUrl: roomData.url,
+    customerToken: customerTokenData.token,
+    callId: callRef.id,
+    queuePosition,
+  };
+});
+
+// ─────────────────────────────────────────
+// FUNCTION 29: generateAgentCallToken
+// Called by admin when they click "Join Call"
+// Returns a Daily.co owner token for the agent
+// ─────────────────────────────────────────
+export const generateAgentCallToken = onCall({
+  cors: CORS_ORIGINS,
+  secrets: ["DAILY_API_KEY"],
+}, async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "You must be signed in.");
+
+  const adminId = request.auth.uid;
+
+  // Verify caller is an admin
+  const adminSnap = await db.collection("admins").doc(adminId).get();
+  if (!adminSnap.exists) throw new HttpsError("permission-denied", "Admins only.");
+
+  const adminData = adminSnap.data();
+  const adminName: string = adminData?.displayName ?? adminData?.email ?? "Support Agent";
+
+  const {callId} = request.data as { callId: string };
+  if (!callId) throw new HttpsError("invalid-argument", "callId is required.");
+
+  const callSnap = await db.collection("supportCalls").doc(callId).get();
+  if (!callSnap.exists) throw new HttpsError("not-found", "Call not found.");
+
+  const callData = callSnap.data()!;
+  if (callData.status === "ended") throw new HttpsError("failed-precondition", "This call has already ended.");
+
+  const dailyApiKey = process.env.DAILY_API_KEY;
+  if (!dailyApiKey) throw new HttpsError("internal", "DAILY_API_KEY is not configured.");
+
+  const expiresAt = Math.floor(Date.now() / 1000) + 7200;
+
+  // Agent gets owner token so they can control the room
+  const agentTokenRes = await fetch("https://api.daily.co/v1/meeting-tokens", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${dailyApiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      properties: {
+        room_name: callData.roomName,
+        user_name: adminName,
+        user_id: adminId,
+        exp: expiresAt,
+        is_owner: true,
+        start_video_off: true,
+        start_audio_off: false,
+      },
+    }),
+  });
+
+  if (!agentTokenRes.ok) {
+    const err = await agentTokenRes.text();
+    throw new HttpsError("internal", `Daily.co agent token failed: ${err}`);
+  }
+
+  const agentTokenData = await agentTokenRes.json() as { token: string };
+
+  // Update call status to active, record which admin joined
+  await db.collection("supportCalls").doc(callId).update({
+    status: "active",
+    agentId: adminId,
+    agentName: adminName,
+    joinedAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  console.info(`[generateAgentCallToken] Admin ${adminId} joined call ${callId}`);
+
+  return {
+    success: true,
+    agentToken: agentTokenData.token,
+    roomUrl: callData.roomUrl,
+    roomName: callData.roomName,
+    customerName: callData.customerName,
+  };
+});
+
+// ─────────────────────────────────────────
+// FUNCTION 30: endSupportCall
+// Called by either customer or agent to end the call
+// Deletes the Daily.co room and marks call as ended
+// ─────────────────────────────────────────
+export const endSupportCall = onCall({
+  cors: CORS_ORIGINS,
+  secrets: ["DAILY_API_KEY"],
+}, async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "You must be signed in.");
+
+  const {callId} = request.data as { callId: string };
+  if (!callId) throw new HttpsError("invalid-argument", "callId is required.");
+
+  const callSnap = await db.collection("supportCalls").doc(callId).get();
+  if (!callSnap.exists) throw new HttpsError("not-found", "Call not found.");
+
+  const callData = callSnap.data()!;
+  const uid = request.auth.uid;
+
+  // Only the customer or assigned agent can end the call
+  const isCustomer = callData.customerId === uid;
+  const isAgent = callData.agentId === uid;
+  const isAdmin = (await db.collection("admins").doc(uid).get()).exists;
+
+  if (!isCustomer && !isAgent && !isAdmin) {
+    throw new HttpsError("permission-denied", "Not authorised to end this call.");
+  }
+
+  const dailyApiKey = process.env.DAILY_API_KEY;
+  if (!dailyApiKey) throw new HttpsError("internal", "DAILY_API_KEY is not configured.");
+
+  // Delete the Daily.co room
+  try {
+    await fetch(`https://api.daily.co/v1/rooms/${callData.roomName}`, {
+      method: "DELETE",
+      headers: {"Authorization": `Bearer ${dailyApiKey}`},
+    });
+  } catch (e) {
+    console.warn("[endSupportCall] Room deletion failed (non-fatal):", e);
+  }
+
+  // Mark call as ended
+  await db.collection("supportCalls").doc(callId).update({
+    status: "ended",
+    endedAt: admin.firestore.FieldValue.serverTimestamp(),
+    endedBy: uid,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  // Update queue positions for all still-waiting calls
+  const waitingSnap = await db.collection("supportCalls")
+    .where("status", "==", "waiting")
+    .orderBy("createdAt", "asc")
+    .get();
+
+  const batch = db.batch();
+  waitingSnap.docs.forEach((d, i) => {
+    batch.update(d.ref, {queuePosition: i + 1});
+  });
+  await batch.commit();
+
+  console.info(`[endSupportCall] Call ${callId} ended by uid=${uid}`);
+  return {success: true};
+});
+
 export * from "./vendorPayouts";
 export * from "./riderPayouts";
 export * from "./adminPayouts";

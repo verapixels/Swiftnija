@@ -14,6 +14,7 @@ import {
 } from "react-icons/fi";
 import { RiWhatsappLine } from "react-icons/ri";
 import { MdVerified } from "react-icons/md";
+import InternetCallPage from "./Internetcallpage";
 
 const ACCENT = "#FF6B00";
 
@@ -307,6 +308,7 @@ export default function SupportPage() {
   const [showNew,  setShowNew]    = useState(false);
   const [faqOpen,  setFaqOpen]    = useState<number | null>(null);
   const [loading,  setLoading]    = useState(true);
+  const [showInternetCall, setShowInternetCall] = useState(false);
   const uid = auth.currentUser?.uid;
 
   useEffect(() => {
@@ -351,6 +353,10 @@ export default function SupportPage() {
 
       {openTicket  && <ChatModal    ticket={openTicket} onClose={() => setOpenTicket(null)} c={c} dark={dark} />}
       {showNew     && <NewTicketModal onClose={() => setShowNew(false)} onCreated={t => { setShowNew(false); setOpenTicket(t); }} c={c} />}
+
+       {showInternetCall && (
+  <InternetCallPage onClose={() => setShowInternetCall(false)} />
+)}
 
       <div className="sp-page" style={{ background: c.bg, color: c.txt }}>
         <div className="sp-wrap">
@@ -453,6 +459,32 @@ export default function SupportPage() {
               )}
             </div>
           )}
+
+          <div style={{ marginBottom: 24, animation: "sp-in .35s ease .07s both" }}>
+  <h2 style={{ fontFamily: "'Syne',sans-serif", fontSize: 16, fontWeight: 800, color: c.txt, margin: "0 0 12px" }}>
+    Call Customer Care
+  </h2>
+  <button
+    onClick={() => { if (uid) setShowInternetCall(true); }}
+    style={{
+      display: "flex", alignItems: "center", gap: 14,
+      width: "100%", padding: "18px 20px", borderRadius: 20,
+      background: uid ? `linear-gradient(135deg,${ACCENT},#FF8C00)` : c.dim,
+      border: "none", color: "white",
+      cursor: uid ? "pointer" : "not-allowed",
+      boxShadow: uid ? "0 8px 28px rgba(255,107,0,.3)" : "none",
+      marginBottom: 10,
+    }}
+  >
+    <div style={{ width: 46, height: 46, borderRadius: 13, background: "rgba(255,255,255,0.2)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+      <FiHeadphones size={22} />
+    </div>
+    <div style={{ flex: 1, textAlign: "left" }}>
+      <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 15, fontWeight: 900 }}>Internet Call (Recommended)</div>
+      <div style={{ fontSize: 12, opacity: .85, marginTop: 2, fontWeight: 600 }}>Stay in app · Branded experience · Audio only</div>
+    </div>
+  </button>
+</div>
 
           {/* Contact Cards */}
           <div style={{ marginBottom: 24, animation: "sp-in .35s ease .1s both" }}>

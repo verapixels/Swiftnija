@@ -17,6 +17,7 @@ export const STATUS_CONFIG = {
 export type Product = {
   id: string; name: string; price: number; stock: number;
   status: string; sales: number; img: string; category: string; vendorId: string;
+  subCategory?: string;
 };
 
 export type Order = {

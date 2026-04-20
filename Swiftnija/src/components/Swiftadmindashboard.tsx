@@ -15,6 +15,8 @@ import {
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, auth, storage } from "../firebase";
 import { useNavigate } from "react-router-dom";
+import AdminLiveCalls from "../components/Adminlivecalls";
+
 
 // ─── REACT ICONS ──────────────────────────────────────────────────────────────
 import {
@@ -2256,6 +2258,7 @@ export default function SwiftAdminDashboard() {
   const [pendingBadgeCount, setPendingBadgeCount] = useState(0);
   const [pendingRequestCount, setPendingRequestCount] = useState(0);
   const [activeAdsCount, setActiveAdsCount] = useState(0);
+  const [waitingCallsCount, setWaitingCallsCount] = useState(0);
   const [theme, setTheme] = useState<Theme>(() => (localStorage.getItem("swiftadmin_theme") as Theme) || "dark");
 const { banner: maintenanceBanner, dismissed: bannerDismissed, dismiss: dismissBanner } = useMaintenanceBanner("admin");
   const C = theme === "dark" ? DARK : LIGHT;
@@ -2296,6 +2299,14 @@ const { banner: maintenanceBanner, dismissed: bannerDismissed, dismiss: dismissB
     return () => { u1(); u2(); u3(); };
   }, [authChecked]);
 
+  useEffect(() => {
+  if (!authChecked) return;
+  return onSnapshot(
+    query(collection(db, "supportCalls"), where("status", "==", "waiting")),
+    snap => setWaitingCallsCount(snap.size)
+  );
+}, [authChecked]);
+
   const handleLogout = async () => { await signOut(auth); navigate("/admin/login"); };
 
   const NAV = [
@@ -2304,6 +2315,7 @@ const { banner: maintenanceBanner, dismissed: bannerDismissed, dismiss: dismissB
     { key: "vendors",     icon: <RiStoreLine size={18} />,         label: "Vendors"        },
     { key: "riders",      icon: <RiBikeLine size={18} />,          label: "Riders"         },
     { key: "orders",      icon: <RiShoppingBagLine size={18} />,   label: "Orders"         },
+     { key: "livecalls",   icon: <RiPhoneLine size={18} />,         label: "Live Calls", badge: waitingCallsCount },
     { key: "ads",         icon: <RiMegaphoneLine size={18} />,     label: "Ads", badge: activeAdsCount },
     { key: "sendpickup",  icon: <RiBox3Line size={18} />,          label: "Send & Pickup"  },
     { key: "support",     icon: <RiMessage2Line size={18} />,      label: "Support"        },
@@ -2321,6 +2333,7 @@ const { banner: maintenanceBanner, dismissed: bannerDismissed, dismiss: dismissB
       case "vendors":     return <VendorsPage {...props} />;
       case "riders":      return <RidersPage {...props} />;
       case "orders":      return <OrdersPage {...props} />;
+      case "livecalls":   return <AdminLiveCalls C={C} />;
       case "ads":         return <AdsPage adminUser={adminUser} showToast={showToast} C={C} />;
       case "sendpickup":  return <SendPickupAdminPage showToast={showToast} C={C} />;
       case "support":     return <AdminSupportPage C={C} />;

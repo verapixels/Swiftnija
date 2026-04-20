@@ -3,6 +3,7 @@
 //  1. Add Product modal follows vendor dashboard color theme (dark/light)
 //  2. Delete product uses a styled in-app modal instead of browser confirm()
 //  3. New field: "What customers will see" section with description, features, care instructions
+//  4. CATEGORY_TREE with main categories + subcategories replacing flat CATEGORIES list
 
 import { useState, useRef } from "react";
 import { createPortal } from "react-dom";
@@ -29,23 +30,84 @@ export const SIZE_PRESETS = {
 } as const;
 export type SizeCategory = keyof typeof SIZE_PRESETS;
 
-const CATEGORIES = [
-  "Food & Drinks", "Grocery", "Pharmacy", "Fashion",
-  "Electronics", "Beauty", "Bakery", "Other",
-];
+// ── Category Tree ─────────────────────────────────────────────────────────────
+const CATEGORY_TREE: Record<string, { label: string; subcategories: string[] }> = {
+  restaurants: {
+    label: "Restaurants",
+    subcategories: ["Main Course", "Starters", "Soups & Stews", "Rice & Pasta", "Grills", "Local Dishes", "Continental", "Salads", "Desserts"],
+  },
+  fastfood: {
+    label: "Fast Food",
+    subcategories: ["Burgers", "Pizza", "Shawarma", "Fried Chicken", "Hot Dogs", "Wraps", "Fries & Sides", "Snacks"],
+  },
+  pharmacy: {
+    label: "Pharmacy",
+    subcategories: ["Prescription Drugs", "OTC Medications", "Vitamins", "First Aid", "Baby Health", "Medical Devices", "Sanitizers & PPE"],
+  },
+  supermarket: {
+    label: "Supermarket",
+    subcategories: ["Canned Foods", "Dairy Products", "Frozen Foods", "Condiments", "Cooking Oil", "Flour & Grains", "Snacks & Biscuits", "Baby Products", "Household Items"],
+  },
+  groceries: {
+    label: "Groceries",
+    subcategories: ["Vegetables", "Fruits", "Tubers", "Grains & Legumes", "Meat & Fish", "Eggs & Dairy", "Spices & Seasoning", "Palm Oil & Produce"],
+  },
+  fashion: {
+    label: "Fashion",
+    subcategories: ["Men Clothing", "Women Clothing", "Kids Clothing", "Shoes & Footwear", "Bags & Purses", "Accessories", "Traditional Wear", "Sportswear", "Underwear & Lingerie", "Jewelry"],
+  },
+  boutique: {
+    label: "Boutique",
+    subcategories: ["Designer Wear", "Evening Gowns", "Casual Wear", "Office Wear", "Wedding & Bridal", "Ankara & Prints", "Luxury Handbags", "Vintage"],
+  },
+  beauty: {
+    label: "Beauty",
+    subcategories: ["Hair Products", "Hair Extensions & Wigs", "Makeup & Cosmetics", "Nail Care", "Eyelashes", "Lipstick & Lip Gloss", "Foundation & Concealer", "Eyeshadow & Eyeliner", "Beauty Tools"],
+  },
+  skincare: {
+    label: "Skincare",
+    subcategories: ["Moisturizers", "Sunscreen", "Toners & Serums", "Face Wash", "Body Lotion", "Brightening & Bleaching", "Anti-Aging", "Oils & Butters", "Natural & Organic"],
+  },
+  perfumes: {
+    label: "Perfumes",
+    subcategories: ["Men Perfumes", "Women Perfumes", "Unisex Perfumes", "Body Spray", "Roll-On & Deodorant", "Arabian Oud", "Mini & Travel Size"],
+  },
+  drinks: {
+    label: "Drinks",
+    subcategories: ["Water & Soft Drinks", "Juices", "Energy Drinks", "Alcoholic Beverages", "Wine", "Beer", "Smoothies & Shakes", "Tea & Coffee", "Zobo & Local Drinks"],
+  },
+  health: {
+    label: "Health & Wellness",
+    subcategories: ["Supplements & Vitamins", "Protein & Fitness", "Herbal & Natural", "Weight Loss", "Sexual Health", "Eye & Ear Care", "Dental Care", "Mental Wellness"],
+  },
+  electronics: {
+    label: "Electronics",
+    subcategories: ["Phones & Accessories", "Laptops & Computers", "TVs & Screens", "Audio & Speakers", "Cameras", "Cables & Chargers", "Smart Gadgets", "Gaming", "Home Appliances"],
+  },
+  sendpickup: {
+    label: "Send & Pickup",
+    subcategories: ["Document Delivery", "Parcel Delivery", "Food Pickup", "Airport Pickup", "Errand Services", "Bulk Haulage"],
+  },
+};
+
+const MAIN_CATEGORIES = Object.entries(CATEGORY_TREE).map(([value, { label }]) => ({ value, label }));
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 type Props = { products: Product[]; loading: boolean; };
 
 const emptyNewProd = () => ({
-  name: "", price: "", stock: "", category: "Food & Drinks",
+  name: "", price: "", stock: "",
+  category: "restaurants",
+  subCategory: "",
   description: "",
-  highlights: "",      // NEW — bullet points of key features/highlights
-  careInfo: "",        // NEW — care instructions / how to use
+  highlights: "",
+  careInfo: "",
   img: "", imgFile: null as File | null,
   weightKg: "", sizeCategory: "" as SizeCategory | "",
   lengthCm: "", widthCm: "", heightCm: "",
   showDims: false,
-  showCustomerPreview: false,  // toggle preview section
+  showCustomerPreview: false,
 });
 
 // ─── Styled Delete Modal ──────────────────────────────────────────────────────
@@ -156,6 +218,9 @@ export default function ProductsPage({ products, loading }: Props) {
   const [addError,      setAddError]      = useState("");
   const [addSuccess,    setAddSuccess]    = useState(false);
 
+  // For edit modal subcategory (tracked separately so existing subCategory shows correctly)
+  const [editSubCategory, setEditSubCategory] = useState("");
+
   const prodImgRef = useRef<HTMLInputElement>(null);
   const editImgRef = useRef<HTMLInputElement>(null);
   const [newProd, setNewProd] = useState(emptyNewProd());
@@ -184,9 +249,11 @@ export default function ProductsPage({ products, loading }: Props) {
 
   const handleAdd = async () => {
     setAddError("");
-    if (!newProd.name.trim()) { setAddError("Product name is required"); return; }
-    if (!newProd.price)       { setAddError("Price is required"); return; }
-    if (!auth.currentUser)    { setAddError("Please log in first"); return; }
+    if (!newProd.name.trim())     { setAddError("Product name is required"); return; }
+    if (!newProd.price)           { setAddError("Price is required"); return; }
+    if (!newProd.category)        { setAddError("Please select a category"); return; }
+    if (!newProd.subCategory)     { setAddError("Please select a sub-category"); return; }
+    if (!auth.currentUser)        { setAddError("Please log in first"); return; }
 
     setAddLoading(true);
     try {
@@ -200,12 +267,13 @@ export default function ProductsPage({ products, loading }: Props) {
         price:       parseFloat(newProd.price) || 0,
         stock:       parseInt(newProd.stock) || 0,
         description: newProd.description.trim(),
-        highlights:  newProd.highlights.trim(),   // NEW
-        careInfo:    newProd.careInfo.trim(),      // NEW
+        highlights:  newProd.highlights.trim(),
+        careInfo:    newProd.careInfo.trim(),
         status:      "active",
         sales:       0,
         img:         imgUrl,
         category:    newProd.category,
+        subCategory: newProd.subCategory,
         createdAt:   serverTimestamp(),
         shipping: {
           weightKg:     newProd.weightKg ? parseFloat(newProd.weightKg) : null,
@@ -243,10 +311,14 @@ export default function ProductsPage({ products, loading }: Props) {
       const editFile = (editImgRef.current as any)?._file;
       if (editFile) imgUrl = await uploadImg(editFile, `${auth.currentUser.uid}/products/${Date.now()}`);
       await updateDoc(doc(db, "products", editProduct.id), {
-        name: editProduct.name, price: editProduct.price,
-        stock: editProduct.stock, status: editProduct.status,
-        category: editProduct.category, img: imgUrl,
-        updatedAt: serverTimestamp(),
+        name:        editProduct.name,
+        price:       editProduct.price,
+        stock:       editProduct.stock,
+        status:      editProduct.status,
+        category:    editProduct.category,
+        subCategory: editSubCategory || editProduct.subCategory || "",
+        img:         imgUrl,
+        updatedAt:   serverTimestamp(),
       });
       setShowEdit(false);
     } catch (err: any) {
@@ -340,19 +412,26 @@ export default function ProductsPage({ products, loading }: Props) {
               <div className="vd-prod-img">
                 <img src={p.img} alt={p.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                 <div className="vd-prod-overlay">
-                  <button className="vd-prod-action-btn" onClick={() => { setEditProduct(p); setShowEdit(true); }}>
+                  <button className="vd-prod-action-btn" onClick={() => {
+                    setEditProduct(p);
+                    setEditSubCategory(p.subCategory || "");
+                    setShowEdit(true);
+                  }}>
                     <FiEdit2 size={14} />
                   </button>
                   <button
                     className="vd-prod-action-btn danger"
-                    onClick={() => setDeleteProduct(p)}   // ← styled modal, not confirm()
+                    onClick={() => setDeleteProduct(p)}
                   >
                     <FiTrash2 size={14} />
                   </button>
                 </div>
               </div>
               <div className="vd-prod-body">
-                <div className="vd-prod-cat">{p.category}</div>
+                <div className="vd-prod-cat">
+                  {CATEGORY_TREE[p.category]?.label || p.category}
+                  {p.subCategory ? ` · ${p.subCategory}` : ""}
+                </div>
                 <div className="vd-prod-name">{p.name}</div>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 4 }}>
                   <div style={{ color: "#FF6B00", fontWeight: 800, fontSize: 14 }}>₦{p.price.toLocaleString()}</div>
@@ -383,7 +462,7 @@ export default function ProductsPage({ products, loading }: Props) {
       )}
 
       {/* ════════════════════════════════════════
-          ADD PRODUCT MODAL — themed, with customer-facing fields
+          ADD PRODUCT MODAL
       ════════════════════════════════════════ */}
       {showAdd && createPortal(
         <div className="vd-modal-overlay" onClick={handleCloseAdd}>
@@ -463,13 +542,51 @@ export default function ProductsPage({ products, loading }: Props) {
                       onChange={e => setNewProd(p => ({ ...p, stock: e.target.value }))} />
                   </div>
                 </div>
+
+                {/* ── Main Category ── */}
                 <div>
-                  <label className="vd-field-label">Category</label>
-                  <select className="vd-field" value={newProd.category}
-                    onChange={e => setNewProd(p => ({ ...p, category: e.target.value }))}>
-                    {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                  <label className="vd-field-label">Main Category *</label>
+                  <select
+                    className="vd-field"
+                    value={newProd.category}
+                    onChange={e => setNewProd(p => ({ ...p, category: e.target.value, subCategory: "" }))}
+                  >
+                    <option value="">-- Select a category --</option>
+                    {MAIN_CATEGORIES.map(c => (
+                      <option key={c.value} value={c.value}>{c.label}</option>
+                    ))}
                   </select>
                 </div>
+
+                {/* ── Sub-category (shows after main category is chosen) ── */}
+                {newProd.category && (
+                  <div>
+                    <label className="vd-field-label">Sub-category *</label>
+                    <select
+                      className="vd-field"
+                      value={newProd.subCategory}
+                      onChange={e => setNewProd(p => ({ ...p, subCategory: e.target.value }))}
+                    >
+                      <option value="">-- Select sub-category --</option>
+                      {(CATEGORY_TREE[newProd.category]?.subcategories ?? []).map(s => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </select>
+                    {newProd.category && newProd.subCategory && (
+                      <div style={{
+                        display: "flex", alignItems: "center", gap: 6, marginTop: 7,
+                        background: "rgba(255,107,0,0.07)", border: "1px solid rgba(255,107,0,0.18)",
+                        borderRadius: 9, padding: "7px 12px",
+                        fontSize: 11, fontWeight: 600, color: "#FF6B00",
+                      }}>
+                        <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#FF6B00", flexShrink: 0, display: "inline-block" }} />
+                        Shows under <strong style={{ marginLeft: 3 }}>{CATEGORY_TREE[newProd.category]?.label}</strong>
+                        &nbsp;→&nbsp;
+                        <strong>{newProd.subCategory}</strong>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -663,13 +780,42 @@ export default function ProductsPage({ products, loading }: Props) {
                     onChange={e => setEditProduct(ep => ep ? { ...ep, stock: +e.target.value } : ep)} />
                 </div>
               </div>
+
+              {/* ── Main Category (Edit) ── */}
               <div>
-                <label className="vd-field-label">Category</label>
-                <select className="vd-field" value={editProduct.category}
-                  onChange={e => setEditProduct(ep => ep ? { ...ep, category: e.target.value } : ep)}>
-                  {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                <label className="vd-field-label">Main Category</label>
+                <select
+                  className="vd-field"
+                  value={editProduct.category}
+                  onChange={e => {
+                    setEditProduct(ep => ep ? { ...ep, category: e.target.value } : ep);
+                    setEditSubCategory("");
+                  }}
+                >
+                  <option value="">-- Select a category --</option>
+                  {MAIN_CATEGORIES.map(c => (
+                    <option key={c.value} value={c.value}>{c.label}</option>
+                  ))}
                 </select>
               </div>
+
+              {/* ── Sub-category (Edit) ── */}
+              {editProduct.category && (
+                <div>
+                  <label className="vd-field-label">Sub-category</label>
+                  <select
+                    className="vd-field"
+                    value={editSubCategory || editProduct.subCategory || ""}
+                    onChange={e => setEditSubCategory(e.target.value)}
+                  >
+                    <option value="">-- Select sub-category --</option>
+                    {(CATEGORY_TREE[editProduct.category]?.subcategories ?? []).map(s => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               <div>
                 <label className="vd-field-label">Status</label>
                 <select className="vd-field" value={editProduct.status}

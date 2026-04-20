@@ -243,20 +243,24 @@ useEffect(() => {
   if (!uid) return;
 
   const q = query(
-    collection(db, "orders"),
-    where("vendorId", "==", uid),   // ✅ add this line
-    orderBy("createdAt", "desc"),
-  );
+  collection(db, "orders"),
+  where("vendorId", "==", uid),
+  where("paymentStatus", "==", "paid"),   // ← add this
+  orderBy("createdAt", "desc"),
+);
 
   const unsub = onSnapshot(q, (snap) => {
-      snap.docChanges().forEach((change) => {
-        if (change.type !== "added") return;
-        const data = change.doc.data();
-        const orderId = change.doc.id;
+     // AFTER — only notify when payment is confirmed
+snap.docChanges().forEach((change) => {
+  if (change.type !== "added") return;
+  const data = change.doc.data();
+  const orderId = change.doc.id;
 
-        // Skip orders we've already seen
-        if (seenOrderIds.current.has(orderId)) return;
-        seenOrderIds.current.add(orderId);
+  if (seenOrderIds.current.has(orderId)) return;
+  seenOrderIds.current.add(orderId);
+
+  // ✅ KEY FIX: skip unpaid orders entirely
+  if (data.paymentStatus !== "paid") return;
 
         // Skip if it's an old order (older than 5 mins)
         const createdAt = data.createdAt as Timestamp | null;

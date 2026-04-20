@@ -412,7 +412,7 @@ export default function OrdersPage() {
             )}
           </section>
 
-          <div className="op-history-card" style={{ background: dark ? "#111118" : "#f5f5ff", border: `1.5px solid ${c.brd}` }} onClick={() => navigate("/profile?tab=history")}>
+          <div className="op-history-card" style={{ background: dark ? "#111118" : "#f5f5ff", border: `1.5px solid ${c.brd}` }} onClick={() => navigate("/orders/history")}>
             <div className="op-history-icon" style={{ background: "rgba(255,107,0,.09)" }}><FiPackage size={18} color={ACCENT} /></div>
             <div style={{ flex: 1 }}>
               <p style={{ color: c.txt, fontWeight: 700, fontSize: 13, margin: 0 }}>Review past orders or reorder?</p>
@@ -1059,10 +1059,9 @@ function BankTransferPopup({ dark, c, total, orderId, onClose, onSuccess }: Bank
 
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,.75)", display: "flex", alignItems: "flex-end", justifyContent: "center", backdropFilter: "blur(4px)" }}>
-      <div style={{ width: "100%", maxWidth: 480, background: dark ? "#0e0e18" : "#fff", borderRadius: "24px 24px 0 0", padding: "0 0 40px", boxShadow: "0 -20px 60px rgba(0,0,0,.4)", animation: "op-in .3s ease" }}>
-
+     <div style={{ width: "100%", maxWidth: 480, background: dark ? "#0e0e18" : "#fff", borderRadius: "24px 24px 0 0", padding: "0 0 32px", boxShadow: "0 -20px 60px rgba(0,0,0,.4)", animation: "op-in .3s ease", maxHeight: "90vh", overflowY: "auto" }}>
         {/* Handle + header */}
-        <div style={{ display: "flex", justifyContent: "center", padding: "14px 0 0" }}>
+        <div style={{ display: "flex", justifyContent: "center", padding: "20px 0 8px" }}>
           <div style={{ width: 40, height: 4, borderRadius: 2, background: dark ? "#2a2a3a" : "#e0e0f0" }} />
         </div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 20px 0" }}>
@@ -1102,7 +1101,7 @@ function BankTransferPopup({ dark, c, total, orderId, onClose, onSuccess }: Bank
               {/* Amount to pay */}
               <div style={{ textAlign: "center", margin: "0 0 16px" }}>
                 <div style={{ fontSize: 11, fontWeight: 800, color: dark ? "#606080" : "#9090b0", textTransform: "uppercase", letterSpacing: ".8px", marginBottom: 4 }}>Amount to Pay</div>
-                <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 32, fontWeight: 900, color: ACCENT }}>₦{total.toLocaleString()}</div>
+              <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 26, fontWeight: 900, color: ACCENT }}>₦{total.toLocaleString()}</div>
                 <div style={{ fontSize: 11, color: dark ? "#606080" : "#9090b0", fontWeight: 600, marginTop: 2 }}>Transfer exactly this amount to confirm your order</div>
               </div>
 
@@ -1116,12 +1115,12 @@ function BankTransferPopup({ dark, c, total, orderId, onClose, onSuccess }: Bank
                 {/* Account number — large + copy */}
                 <div style={{ padding: "16px", borderBottom: `1px solid ${dark ? "#1c1c2a" : "#e0e0f0"}` }}>
                   <div style={{ fontSize: 11, fontWeight: 800, color: dark ? "#606080" : "#9090b0", textTransform: "uppercase", letterSpacing: ".6px", marginBottom: 8 }}>Account Number</div>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-                    <span style={{ fontFamily: "'Syne',sans-serif", fontSize: 28, fontWeight: 900, color: ACCENT, letterSpacing: 4 }}>{accountDetails.account_number}</span>
-                    <button onClick={copyAcct} style={{ width: 40, height: 40, borderRadius: 12, border: `1.5px solid rgba(255,107,0,.3)`, background: "rgba(255,107,0,.08)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: ACCENT, flexShrink: 0, transition: "all .2s" }}>
-                      {copied ? <FiCheckCircle size={18} /> : <FiCopy size={18} />}
-                    </button>
-                  </div>
+                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+  <span style={{ fontFamily: "'Syne',sans-serif", fontSize: 18, fontWeight: 900, color: ACCENT, letterSpacing: 1, wordBreak: "break-all", flex: 1 }}>{accountDetails.account_number}</span>
+  <button onClick={copyAcct} style={{ width: 36, height: 36, borderRadius: 10, border: `1.5px solid rgba(255,107,0,.3)`, background: "rgba(255,107,0,.08)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: ACCENT, flexShrink: 0 }}>
+    {copied ? <FiCheckCircle size={16} /> : <FiCopy size={16} />}
+  </button>
+</div>
                   {copied && <div style={{ fontSize: 11, color: "#22c55e", fontWeight: 700, marginTop: 4 }}>✓ Copied to clipboard!</div>}
                 </div>
                 {/* Account name */}
@@ -1226,20 +1225,23 @@ function PaymentPage({ dark, c, vendorCart, subtotal, discount, deliveryFee, sel
     return orderId;
   };
 
-  // FIX 1: Bank transfer → create order → show DVA modal
+ // REPLACE WITH:
   const handleBankTransfer = async () => {
+    if (processing) return;
     setProcessing(true);
     try {
       const orderId = await createOrder();
       setPendingOrderId(orderId);
       setShowBankModal(true);
     } catch (e: any) {
-      alert("Error: " + (e?.message || String(e)));
+      alert("Could not create order: " + (e?.message || String(e)));
     } finally {
+      // Don't set processing false here — keep button disabled until
+      // BankTransferPopup either succeeds or user closes it
       setProcessing(false);
     }
   };
-
+  
   // Card → Paystack popup (existing flow)
   const openPaystack = async () => {
     setProcessing(true);

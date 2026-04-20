@@ -236,6 +236,7 @@ export default function VendorPayoutsPage() {
   const vendorId = auth.currentUser?.uid ?? "";
   const fns = getFunctions();
 
+// REPLACE WITH (adds two new state vars):
   const [paystackTotal, setPaystackTotal] = useState<number | null>(null);
   const [balanceLoading, setBalanceLoading] = useState(true);
   const [bankAccount, setBankAccount] = useState<BankAccount | null>(null);
@@ -243,6 +244,9 @@ export default function VendorPayoutsPage() {
   const [unlinking, setUnlinking] = useState(false);
   const [linkError, setLinkError] = useState<string | null>(null);
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
+  // Running balance from paid orders — updates in real time
+  const [runningBalance, setRunningBalance] = useState<number>(0);
+  const [runningBalanceLoading, setRunningBalanceLoading] = useState(true);
   const [txs, setTxs] = useState<VendorWalletTx[]>([]);
   const [lastDoc, setLastDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
   const [loadingInitial, setLoadingInitial] = useState(true);
@@ -255,12 +259,40 @@ export default function VendorPayoutsPage() {
     setTimeout(() => setToast(null), 3500);
   };
 
+  // REPLACE WITH (add the new useEffect right after):
   // Live: bank account from vendor doc
   useEffect(() => {
     if (!vendorId) return;
     return onSnapshot(doc(db, "vendors", vendorId), snap => {
       setBankAccount(snap.data()?.bankAccount ?? null);
     });
+  }, [vendorId]);
+
+  // Real-time running balance from paid orders
+  // Updates the moment a customer's payment is confirmed — no waiting for delivery or Paystack T+1
+  useEffect(() => {
+    if (!vendorId) return;
+    const q = query(
+      collection(db, "orders"),
+      where("vendorId", "==", vendorId),
+      where("paymentStatus", "==", "paid"),
+      orderBy("createdAt", "desc"),
+      limit(200)
+    );
+    const unsub = onSnapshot(q, (snap) => {
+      const total = snap.docs.reduce((sum, d) => {
+        const data = d.data();
+        // vendorShare is already stored on the order when your webhook splits it.
+        // Fall back to (total * 0.8) if vendorShare isn't stored yet.
+        const share = data.vendorShare ?? (data.total ?? 0) * 0.8;
+        return sum + share;
+      }, 0);
+      setRunningBalance(total);
+      setRunningBalanceLoading(false);
+    }, () => {
+      setRunningBalanceLoading(false);
+    });
+    return () => unsub();
   }, [vendorId]);
 
   const fetchPaystackTotal = useCallback(async () => {
@@ -416,23 +448,25 @@ export default function VendorPayoutsPage() {
           </div>
 
           {/* Balance — correct source */}
-          {balanceLoading ? (
+           // REPLACE WITH:
+          {runningBalanceLoading ? (
             <div style={{ height: 30, width: "55%", borderRadius: 7, background: "rgba(255,255,255,0.06)", animation: "pulse 1.4s infinite", marginBottom: 6 }} />
-          ) : paystackTotal !== null ? (
-            <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 24, fontWeight: 900, color: "#e8e8f0", letterSpacing: "-0.8px", lineHeight: 1, marginBottom: 6 }}>
-              &#8358;{fmt(paystackTotal)}
-            </div>
           ) : (
-            <div style={{ fontSize: 13, color: "rgba(232,232,240,0.35)", marginBottom: 6, fontStyle: "italic" }}>
-              Link a bank account to view earnings
+            <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 24, fontWeight: 900, color: "#e8e8f0", letterSpacing: "-0.8px", lineHeight: 1, marginBottom: 6 }}>
+              &#8358;{fmt(runningBalance)}
             </div>
           )}
 
-          <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "rgba(232,232,240,0.38)", fontWeight: 500, marginBottom: 14 }}>
-            <FiCheckCircle size={10} color="#10B981" />
-            Settled automatically to your bank by Paystack
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "rgba(232,232,240,0.38)", fontWeight: 500 }}>
+              <FiCheckCircle size={10} color="#10B981" />
+              Cumulative from all paid orders · updates instantly
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "rgba(232,232,240,0.28)", fontWeight: 500 }}>
+              <FiClock size={10} color="#F59E0B" />
+              Paystack settles to your bank next business day
+            </div>
           </div>
-
           {/* 3 stat chips */}
           <div style={{ display: "flex", gap: 8 }}>
             {([

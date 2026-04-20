@@ -36,6 +36,7 @@ import RiderProfile from "./Pages/Riderprofile";
 import LandingPage from "./Pages/Landingpage";
 import   ResetPassword from "./Pages/ResetPassword";
 import { VendorCartPage } from "./Pages/CustomerOrdersPage";
+import UserOrderHistory from "./Pages/Userorderhistory";
 
 
 function OrderTrackingWrapper() {
@@ -234,6 +235,7 @@ export default function App() {
           <Route path="/support"                 element={<SupportPage />} />
           <Route path="/profile"                 element={<UserProfile />} />
           <Route path="/cart"                    element={<CustomerOrdersPage />} />
+          <Route path="/orders/history" element={<UserOrderHistory />} />
           <Route path="/send-pickup"             element={<SendPickup />} />
           <Route path="/category/:categoryId"    element={<VendorListPage />} />
           <Route path="/store/:vendorId"         element={<VendorDetailPage />} />

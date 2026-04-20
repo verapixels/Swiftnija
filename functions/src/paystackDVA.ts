@@ -81,15 +81,18 @@ export const paystackCreateDVA = onCall(
         customerCode = findData.data[0].customer_code;
       } else {
         // Create new customer
-      // Create new customer
+        const customerPhone = orderData.customerPhone || userPhone || null;
         const createRes = await fetch("https://api.paystack.co/customer", {
           method: "POST",
-          headers: {"Authorization": `Bearer ${PAYSTACK_SECRET}`, "Content-Type": "application/json"},
+          headers: {
+            "Authorization": `Bearer ${PAYSTACK_SECRET}`,
+            "Content-Type": "application/json",
+          },
           body: JSON.stringify({
             email,
             first_name: orderData.customerName?.split(" ")[0] ?? "Customer",
             last_name: orderData.customerName?.split(" ")[1] ?? "",
-            phone: orderData.customerPhone || userPhone || "",
+            ...(customerPhone ? {phone: customerPhone} : {}),
           }),
         });
         const createData = await createRes.json() as { status: boolean; data: { customer_code: string } };
@@ -100,16 +103,33 @@ export const paystackCreateDVA = onCall(
       await db.collection("orders").doc(orderId).update({paystackCustomerCode: customerCode});
     }
 
-    console.info("[paystackCreateDVA] Creating DVA for customer:", customerCode);
+    // Step 2: Create DVA — phone must be passed directly
+    const dvaPhone = orderData.customerPhone || userPhone || null;
 
-    // Step 2: Create a DVA for the customer
+    if (!dvaPhone) {
+      throw new HttpsError(
+        "invalid-argument",
+        "Please add a phone number to your profile before using bank transfer"
+      );
+    }
+
+    console.info("[paystackCreateDVA] Creating DVA with phone:", dvaPhone);
+    const nameParts = (orderData.customerName || "Customer").trim().split(" ");
+    const firstName = nameParts[0] || "Customer";
+    const lastName = nameParts.slice(1).join(" ") || firstName; // fallback to firstName if no last name
+
     const dvaRes = await fetch("https://api.paystack.co/dedicated_account", {
       method: "POST",
-      headers: {"Authorization": `Bearer ${PAYSTACK_SECRET}`, "Content-Type": "application/json"},
-      // To this:
+      headers: {
+        "Authorization": `Bearer ${PAYSTACK_SECRET}`,
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify({
         customer: customerCode,
-        preferred_bank: "titan-paystack",
+        preferred_bank: "wema-bank",
+        phone: dvaPhone,
+        first_name: firstName,
+        last_name: lastName,
       }),
     });
     const dvaData = await dvaRes.json() as {
@@ -121,6 +141,9 @@ export const paystackCreateDVA = onCall(
         account_name: string;
       };
     };
+
+    console.error("[paystackCreateDVA] DVA response:", JSON.stringify(dvaData));
+
 
     if (!dvaData.status) {
       console.error("[paystackCreateDVA] DVA failed:", JSON.stringify(dvaData));
@@ -291,6 +314,36 @@ export const paystackWebhookV2 = onRequest(
 
       await batch.commit();
       console.info(`[paystackWebhookV2] ✅ Order ${orderId} confirmed — ₦${paidAmountKobo / 100}`);
+
+      await batch.commit();
+      console.info(`[paystackWebhookV2] ✅ Order ${orderId} confirmed — ₦${paidAmountKobo / 100}`);
+
+      // ── VENDOR WALLET CREDIT ──────────────────────────────────────────────────
+      try {
+        const freshOrderSnap = await orderRef.get();
+        const freshOrder = freshOrderSnap.data();
+
+        if (freshOrder && freshOrder.vendorId) {
+          const platformFeePercent = Number(settings.platformFeePercent ?? 0.20);
+          const vendorShare = Math.round((freshOrder.total ?? 0) * (1 - platformFeePercent));
+
+          await db.collection("vendorWalletTransactions").add({
+            vendorId: freshOrder.vendorId,
+            type: "credit",
+            amount: vendorShare,
+            desc: `Payment received for order #${(freshOrder.orderId ?? orderId).slice(-8).toUpperCase()}`,
+            orderId,
+            orderNumber: (freshOrder.orderId ?? orderId).slice(-8).toUpperCase(),
+            settlementStatus: "pending",
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+
+          await orderRef.update({vendorShare});
+          console.info(`[paystackWebhookV2] Vendor ${freshOrder.vendorId} credited ₦${vendorShare}`);
+        }
+      } catch (vendorErr) {
+        console.error("[paystackWebhookV2] Vendor wallet credit error (non-fatal):", vendorErr);
+      }
 
       // ── 4. FIX 2: Rider split (credited when delivery is confirmed)
       //    We don't credit rider yet — updateOrderStatus does that on "delivered"
