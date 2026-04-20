@@ -31,79 +31,98 @@ interface CallData {
   customerToken?: string;
 }
 
-// ── Voice engine ──────────────────────────────────────────────────────────────
-// Tries Nigerian English first, then falls back gracefully.
-// "Swift 9 ja" spells out the name so TTS pronounces it correctly.
-function normalizeForSpeech(text: string): string {
+// ── speak() — guaranteed to resolve, never hangs ──────────────────────────────
+// On live HTTPS, speechSynthesis often fires onend immediately without speaking,
+// or never fires at all. We use a hard 5-second timeout so the call always moves
+// forward regardless of whether the browser actually spoke.
+//
+// Brand name fix: "Swift Naija" is the phonetic spelling that makes every
+// English TTS engine say the Nigerian slang "9ja" correctly.
+// "9" is read as "nine" by TTS, not "naija" — so we replace it entirely.
+
+function fixBrandName(text: string): string {
   return text
-    // Make the brand name sound right in any accent
-    .replace(/swift\s*9ja/gi, "Swift 9 ja")
-    .replace(/swiftnija/gi,   "Swift 9 ja")
-    .replace(/swift9ja/gi,    "Swift 9 ja");
-}
-
-function getBestVoice(): SpeechSynthesisVoice | null {
-  const voices = window.speechSynthesis.getVoices();
-  if (!voices.length) return null;
-
-  // Priority list — Nigerian English is ideal, then other African/British accents
-  return (
-    voices.find(v => v.lang === "en-NG")                                                  ||
-    voices.find(v => v.lang === "en-GH")                                                  ||
-    voices.find(v => v.lang === "en-ZA" && !v.name.toLowerCase().includes("male"))        ||
-    voices.find(v => v.name === "Google UK English Female")                               ||
-    voices.find(v => v.name === "Microsoft Zira Desktop - English (United States)")       ||
-    voices.find(v => v.name === "Samantha")                                               ||
-    voices.find(v => v.name.toLowerCase().includes("female") && v.lang.startsWith("en")) ||
-    voices.find(v => v.lang === "en-GB" && !v.name.toLowerCase().includes("male"))        ||
-    voices.find(v => v.lang.startsWith("en"))                                             ||
-    null
-  );
+    .replace(/swift\s*9ja/gi,  "Swift Naija")
+    .replace(/swiftnija/gi,    "Swift Naija")
+    .replace(/swift9ja/gi,     "Swift Naija")
+    .replace(/swift\s*nija/gi, "Swift Naija");
 }
 
 function speak(text: string, rate = 0.88, pitch = 1.05): Promise<void> {
   return new Promise(resolve => {
-    if (!window.speechSynthesis) { resolve(); return; }
-    window.speechSynthesis.cancel();
+    // Always resolve after 5 seconds no matter what
+    const hardTimeout = setTimeout(() => resolve(), 5000);
 
-    // Hard safety — never hang for more than 8 seconds
-    const safetyTimeout = setTimeout(() => resolve(), 8000);
+    const done = () => {
+      clearTimeout(hardTimeout);
+      resolve();
+    };
 
-    const doSpeak = () => {
-      const utt        = new SpeechSynthesisUtterance(normalizeForSpeech(text));
-      utt.rate         = rate;
-      utt.pitch        = pitch;
-      utt.volume       = 1;
-      const voice      = getBestVoice();
+    if (!window.speechSynthesis) { done(); return; }
+
+    try { window.speechSynthesis.cancel(); } catch { /**/ }
+
+    const trySpeak = () => {
+      const utt   = new SpeechSynthesisUtterance(fixBrandName(text));
+      utt.rate    = rate;
+      utt.pitch   = pitch;
+      utt.volume  = 1;
+      utt.onend   = done;
+      utt.onerror = done;
+
+      const voices = window.speechSynthesis.getVoices();
+      const voice  =
+        voices.find(v => v.lang === "en-NG")                                                  ||
+        voices.find(v => v.lang === "en-GH")                                                  ||
+        voices.find(v => v.lang === "en-ZA" && !v.name.toLowerCase().includes("male"))        ||
+        voices.find(v => v.name === "Google UK English Female")                               ||
+        voices.find(v => v.name === "Microsoft Zira Desktop - English (United States)")       ||
+        voices.find(v => v.name === "Samantha")                                               ||
+        voices.find(v => v.name.toLowerCase().includes("female") && v.lang.startsWith("en")) ||
+        voices.find(v => v.lang === "en-GB" && !v.name.toLowerCase().includes("male"))        ||
+        voices.find(v => v.lang.startsWith("en"));
+
       if (voice) utt.voice = voice;
 
-      utt.onend   = () => { clearTimeout(safetyTimeout); resolve(); };
-      utt.onerror = () => { clearTimeout(safetyTimeout); resolve(); };
-      window.speechSynthesis.speak(utt);
+      try {
+        window.speechSynthesis.speak(utt);
+      } catch {
+        done();
+      }
     };
 
     if (window.speechSynthesis.getVoices().length > 0) {
-      doSpeak();
+      trySpeak();
     } else {
-      // Voices not loaded yet — wait for the event, with a fallback timer
-      const fallback = setTimeout(doSpeak, 700);
+      const fallback = setTimeout(trySpeak, 800);
       window.speechSynthesis.onvoiceschanged = () => {
         clearTimeout(fallback);
         window.speechSynthesis.onvoiceschanged = null;
-        doSpeak();
+        trySpeak();
       };
     }
   });
 }
 
+// ── speakAll() — speaks lines one by one, each with its own 5s timeout ────────
+// This is the KEY fix for the "stuck on recording message" bug.
+// Each sentence is independent — if one hangs on live, it times out after 5s
+// and the next sentence plays. The whole greeting always completes.
+async function speakAll(lines: string[]): Promise<void> {
+  for (const line of lines) {
+    await speak(line);
+    await new Promise(r => setTimeout(r, 350));
+  }
+}
+
 // ── Jingle ────────────────────────────────────────────────────────────────────
 async function createJingle(): Promise<HTMLAudioElement | null> {
   try {
-    const r   = ref(storage, "support-audio/hold-jingle.mp3.mp4");
-    const url = await getDownloadURL(r);
-    const audio       = new Audio(url);
-    audio.loop        = true;
-    audio.volume      = 0.45;
+    const r     = ref(storage, "support-audio/hold-jingle.mp3.mp4");
+    const url   = await getDownloadURL(r);
+    const audio = new Audio(url);
+    audio.loop   = true;
+    audio.volume = 0.45;
     audio.addEventListener("canplay", () => {
       if (audio.currentTime === 0) audio.currentTime = 3;
     }, { once: true });
@@ -128,11 +147,7 @@ function useCallTimer(running: boolean) {
 
 // ── Star Rating ───────────────────────────────────────────────────────────────
 function StarRating({
-  agentName,
-  callId,
-  onDone,
-  dark,
-  c,
+  agentName, callId, onDone, dark, c,
 }: {
   agentName: string;
   callId: string;
@@ -176,7 +191,8 @@ function StarRating({
         <div style={{
           width: 72, height: 72, borderRadius: "50%",
           background: "rgba(255,107,0,0.08)", border: "2px solid rgba(255,107,0,0.2)",
-          display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          margin: "0 auto 20px",
         }}>
           <RiHeadphoneLine size={34} color={ACCENT} />
         </div>
@@ -197,7 +213,6 @@ function StarRating({
             <div style={{ fontSize: 13, color: c.sub, marginBottom: 28 }}>
               How was your call with <strong style={{ color: c.txt }}>{agentName}</strong>?
             </div>
-
             <div style={{ display: "flex", justifyContent: "center", gap: 10, marginBottom: 14 }}>
               {[1, 2, 3, 4, 5].map(star => (
                 <button
@@ -213,21 +228,19 @@ function StarRating({
                 >
                   {(hovered || selected) >= star
                     ? <RiStarFill size={36} color={ACCENT} />
-                    : <RiStarLine size={36} color={c.dim} />
-                  }
+                    : <RiStarLine size={36} color={c.dim} />}
                 </button>
               ))}
             </div>
-
             <div style={{ fontSize: 13, fontWeight: 700, color: ACCENT, minHeight: 20 }}>
               {labels[hovered || selected] || "Tap a star to rate"}
             </div>
-
             <button
               onClick={onDone}
               style={{
                 marginTop: 20, width: "100%", padding: "11px",
-                borderRadius: 12, background: "transparent", border: `1px solid ${c.brd}`,
+                borderRadius: 12, background: "transparent",
+                border: `1px solid ${c.brd}`,
                 color: c.sub, fontSize: 12, fontWeight: 700, cursor: "pointer",
                 fontFamily: "'DM Sans',sans-serif",
               }}
@@ -256,25 +269,25 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
     dim:  dark ? "#30304a" : "#c0c0d8",
   };
 
-  const [phase,       setPhase]       = useState<CallPhase>("init");
-  const [callId,      setCallId]      = useState<string | null>(null);
-  const [callData,    setCallData]    = useState<CallData | null>(null);
-  const [muted,       setMuted]       = useState(false);
-  const [error,       setError]       = useState("");
+  const [phase,        setPhase]        = useState<CallPhase>("init");
+  const [callId,       setCallId]       = useState<string | null>(null);
+  const [callData,     setCallData]     = useState<CallData | null>(null);
+  const [muted,        setMuted]        = useState(false);
+  const [error,        setError]        = useState("");
   const [lastQueuePos, setLastQueuePos] = useState<number | null>(null);
 
-  // FIX: use state instead of ref to prevent double-greeting on live
+  // FIX: useState prevents double-greeting in React Strict Mode on live
   const [greetingStarted, setGreetingStarted] = useState(false);
 
-  const callObj       = useRef<DailyCall | null>(null);
-  const jingleRef     = useRef<HTMLAudioElement | null>(null);
-  const dailyJoined   = useRef(false);
-  const phaseRef      = useRef<CallPhase>("init");
-  const callTimer     = useCallTimer(phase === "active");
+  const callObj     = useRef<DailyCall | null>(null);
+  const jingleRef   = useRef<HTMLAudioElement | null>(null);
+  const dailyJoined = useRef(false);
+  const phaseRef    = useRef<CallPhase>("init");
+  const callTimer   = useCallTimer(phase === "active");
 
   useEffect(() => { phaseRef.current = phase; }, [phase]);
 
-  // ── Queue speech ──────────────────────────────────────────────────────────
+  // ── Queue speech ────────────────────────────────────────────────────────────
   const buildQueueSpeech = (pos: number) => {
     const mins = Math.max(1, pos);
     return (
@@ -284,7 +297,7 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
     );
   };
 
-  // ── Jingle controls ───────────────────────────────────────────────────────
+  // ── Jingle controls ─────────────────────────────────────────────────────────
   const startJingle = useCallback(async () => {
     if (jingleRef.current) return;
     const audio = await createJingle();
@@ -309,7 +322,7 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
     resumeJingle();
   }, [pauseJingle, resumeJingle]);
 
-  // ── STEP 1: Create room ───────────────────────────────────────────────────
+  // ── STEP 1: Create room ─────────────────────────────────────────────────────
   useEffect(() => {
     if (!auth.currentUser) {
       setError("You must be signed in to start a call.");
@@ -332,33 +345,45 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
       });
   }, []);
 
-  // ── STEP 2: Voice greeting ────────────────────────────────────────────────
+  // ── STEP 2: Voice greeting ──────────────────────────────────────────────────
+  // KEY FIX: speakAll() gives each sentence its OWN 5s timeout.
+  // If any sentence hangs on live HTTPS, it moves on after 5s automatically.
+  // The overall 25s cap means it ALWAYS reaches the waiting phase.
   useEffect(() => {
     if (phase !== "greeting" || greetingStarted) return;
     setGreetingStarted(true);
 
     const runGreeting = async () => {
+      // Overall safety cap — always move to waiting within 25 seconds
+      const overallCap = setTimeout(() => {
+        setPhase("waiting");
+        startJingle();
+      }, 25000);
+
       try {
         const h   = new Date().getHours();
         const tod =
-          h >= 5 && h < 12  ? "Good morning" :
+          h >= 5  && h < 12 ? "Good morning" :
           h >= 12 && h < 17 ? "Good afternoon" :
           "Good evening";
 
-        // Brand name is pre-normalised by speak() → "Swift 9 ja"
-        await speak(`${tod}! Welcome to Swift 9 ja Customer Support.`, 0.85, 1.05);
+        const pos  = callData?.queuePosition ?? 1;
+        const mins = Math.max(1, pos);
 
-        await speak(
+        // Each sentence spoken separately with its own 5s timeout
+        await speakAll([
+          `${tod}! Welcome to Swift Naija Customer Support.`,
           "Please note that this call is being recorded for quality assurance and training purposes.",
-          0.88, 1.05
-        );
+          `You are number ${pos} in the queue.`,
+          `Your estimated wait time is approximately ${mins} ${mins === 1 ? "minute" : "minutes"}.`,
+          "Please stay on the line and we will connect you to an agent shortly.",
+        ]);
 
-        const pos = callData?.queuePosition ?? 1;
-        await speak(buildQueueSpeech(pos));
         setLastQueuePos(pos);
       } catch (e) {
         console.error("[Greeting]", e);
       } finally {
+        clearTimeout(overallCap);
         setPhase("waiting");
         startJingle();
       }
@@ -367,7 +392,7 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
     runGreeting();
   }, [phase, greetingStarted]);
 
-  // ── STEP 3: Firestore listener ────────────────────────────────────────────
+  // ── STEP 3: Firestore listener ──────────────────────────────────────────────
   useEffect(() => {
     if (!callId) return;
 
@@ -390,16 +415,14 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
       if (data.status === "hold" && cur === "active") {
         setPhase("hold");
         startJingle();
-        speak("Please hold on, your agent will be back with you shortly.", 0.88, 1.05);
+        speak("Please hold on, your agent will be back with you shortly.");
       }
 
       if (data.status === "active" && cur === "hold" && dailyJoined.current) {
         stopJingle();
         window.speechSynthesis?.cancel();
         setPhase("active");
-        setTimeout(() =>
-          speak("Your agent has returned. Thank you for holding.", 0.88, 1.05), 500
-        );
+        setTimeout(() => speak("Your agent has returned. Thank you for holding."), 500);
       }
 
       if (data.status === "ended" && cur !== "ended" && cur !== "rating") {
@@ -411,7 +434,7 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
     });
   }, [callId]);
 
-  // ── STEP 4: Re-announce queue position ───────────────────────────────────
+  // ── STEP 4: Re-announce queue position ─────────────────────────────────────
   useEffect(() => {
     if (phase !== "waiting" || !callData) return;
     const pos = callData.queuePosition;
@@ -421,20 +444,20 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
     }
   }, [callData?.queuePosition, phase]);
 
-  // ── STEP 5: Connect Daily ─────────────────────────────────────────────────
+  // ── STEP 5: Connect Daily ───────────────────────────────────────────────────
   useEffect(() => {
     if (phase !== "connecting" || !callData?.roomUrl || !callData?.customerToken) return;
 
     const initDaily = async () => {
       try {
         if (callObj.current) {
-          try { await callObj.current.destroy(); } catch {}
+          try { await callObj.current.destroy(); } catch { /**/ }
           callObj.current = null;
         }
         try {
           const existing = DailyIframe.getCallInstance();
           if (existing) await existing.destroy();
-        } catch {}
+        } catch { /**/ }
 
         const call = DailyIframe.createCallObject({
           audioSource: true,
@@ -446,10 +469,7 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
           dailyJoined.current = true;
           setPhase("active");
           setTimeout(() =>
-            speak(
-              "You are now connected to a Swift 9 ja support agent. How can we help you today?",
-              0.88, 1.05
-            ),
+            speak("You are now connected to a Swift Naija support agent. How can we help you today?"),
           800);
         });
 
@@ -483,7 +503,7 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
     initDaily();
   }, [phase]);
 
-  // ── Cleanup on unmount ────────────────────────────────────────────────────
+  // ── Cleanup on unmount ──────────────────────────────────────────────────────
   const cleanupDaily = useCallback(() => {
     if (callObj.current) {
       callObj.current.destroy().catch(() => {});
@@ -500,7 +520,7 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
     };
   }, []);
 
-  // ── Actions ───────────────────────────────────────────────────────────────
+  // ── Actions ─────────────────────────────────────────────────────────────────
   const toggleMute = useCallback(() => {
     if (!callObj.current) return;
     const next = !muted;
@@ -525,7 +545,7 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
     }
   }, [callId, phase, cleanupDaily, stopJingle]);
 
-  // ── Rating screen ─────────────────────────────────────────────────────────
+  // ── Rating screen ───────────────────────────────────────────────────────────
   if (phase === "rating") {
     return (
       <StarRating
@@ -538,7 +558,7 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
     );
   }
 
-  // ── Phase display helpers ─────────────────────────────────────────────────
+  // ── Phase helpers ───────────────────────────────────────────────────────────
   const PhaseIcon = () => {
     if (phase === "init" || phase === "connecting")
       return <RiLoader4Line size={48} color={ACCENT} style={{ animation: "spin 1s linear infinite" }} />;
@@ -739,7 +759,7 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
             </div>
           )}
 
-          {/* On hold — show end call */}
+          {/* On hold */}
           {phase === "hold" && (
             <button onClick={endCall} style={{
               width: "100%", padding: "13px", borderRadius: 14, border: "none",
