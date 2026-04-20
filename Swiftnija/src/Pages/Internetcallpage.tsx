@@ -31,15 +31,7 @@ interface CallData {
   customerToken?: string;
 }
 
-// ── speak() — guaranteed to resolve, never hangs ──────────────────────────────
-// On live HTTPS, speechSynthesis often fires onend immediately without speaking,
-// or never fires at all. We use a hard 5-second timeout so the call always moves
-// forward regardless of whether the browser actually spoke.
-//
-// Brand name fix: "Swift Naija" is the phonetic spelling that makes every
-// English TTS engine say the Nigerian slang "9ja" correctly.
-// "9" is read as "nine" by TTS, not "naija" — so we replace it entirely.
-
+// ── Brand name fix ─────────────────────────────────────────────────────────────
 function fixBrandName(text: string): string {
   return text
     .replace(/swift\s*9ja/gi,  "Swift Naija")
@@ -48,18 +40,13 @@ function fixBrandName(text: string): string {
     .replace(/swift\s*nija/gi, "Swift Naija");
 }
 
+// ── speak() — guaranteed to resolve, never hangs ──────────────────────────────
 function speak(text: string, rate = 0.88, pitch = 1.05): Promise<void> {
   return new Promise(resolve => {
-    // Always resolve after 5 seconds no matter what
     const hardTimeout = setTimeout(() => resolve(), 5000);
-
-    const done = () => {
-      clearTimeout(hardTimeout);
-      resolve();
-    };
+    const done = () => { clearTimeout(hardTimeout); resolve(); };
 
     if (!window.speechSynthesis) { done(); return; }
-
     try { window.speechSynthesis.cancel(); } catch { /**/ }
 
     const trySpeak = () => {
@@ -83,12 +70,7 @@ function speak(text: string, rate = 0.88, pitch = 1.05): Promise<void> {
         voices.find(v => v.lang.startsWith("en"));
 
       if (voice) utt.voice = voice;
-
-      try {
-        window.speechSynthesis.speak(utt);
-      } catch {
-        done();
-      }
+      try { window.speechSynthesis.speak(utt); } catch { done(); }
     };
 
     if (window.speechSynthesis.getVoices().length > 0) {
@@ -104,13 +86,15 @@ function speak(text: string, rate = 0.88, pitch = 1.05): Promise<void> {
   });
 }
 
-// ── speakAll() — speaks lines one by one, each with its own 5s timeout ────────
-// This is the KEY fix for the "stuck on recording message" bug.
-// Each sentence is independent — if one hangs on live, it times out after 5s
-// and the next sentence plays. The whole greeting always completes.
-async function speakAll(lines: string[]): Promise<void> {
+// ── speakAll() — cancelled immediately when cancelledRef is set ───────────────
+// This is the KEY fix: every sentence checks cancelledRef before speaking.
+// When user cancels, we set cancelledRef.current = true and call
+// speechSynthesis.cancel() — the loop sees the flag and stops immediately.
+async function speakAll(lines: string[], cancelledRef: React.MutableRefObject<boolean>): Promise<void> {
   for (const line of lines) {
+    if (cancelledRef.current) return; // ← stop immediately if cancelled
     await speak(line);
+    if (cancelledRef.current) return; // ← stop immediately after each line too
     await new Promise(r => setTimeout(r, 350));
   }
 }
@@ -275,17 +259,26 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
   const [muted,        setMuted]        = useState(false);
   const [error,        setError]        = useState("");
   const [lastQueuePos, setLastQueuePos] = useState<number | null>(null);
-
-  // FIX: useState prevents double-greeting in React Strict Mode on live
   const [greetingStarted, setGreetingStarted] = useState(false);
 
-  const callObj     = useRef<DailyCall | null>(null);
-  const jingleRef   = useRef<HTMLAudioElement | null>(null);
-  const dailyJoined = useRef(false);
-  const phaseRef    = useRef<CallPhase>("init");
-  const callTimer   = useCallTimer(phase === "active");
+  const callObj       = useRef<DailyCall | null>(null);
+  const jingleRef     = useRef<HTMLAudioElement | null>(null);
+  const dailyJoined   = useRef(false);
+  const phaseRef      = useRef<CallPhase>("init");
+  const callTimer     = useCallTimer(phase === "active");
+
+  // ── THE FIX: this ref is shared between greeting loop and endCall ──────────
+  // When user cancels, we set this to true — speakAll() checks it before
+  // every sentence and stops immediately. Speech also gets hard-cancelled.
+  const speechCancelled = useRef(false);
 
   useEffect(() => { phaseRef.current = phase; }, [phase]);
+
+  // ── stopAllSpeech — call this any time you want silence immediately ─────────
+  const stopAllSpeech = useCallback(() => {
+    speechCancelled.current = true;
+    try { window.speechSynthesis?.cancel(); } catch { /**/ }
+  }, []);
 
   // ── Queue speech ────────────────────────────────────────────────────────────
   const buildQueueSpeech = (pos: number) => {
@@ -346,18 +339,19 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
   }, []);
 
   // ── STEP 2: Voice greeting ──────────────────────────────────────────────────
-  // KEY FIX: speakAll() gives each sentence its OWN 5s timeout.
-  // If any sentence hangs on live HTTPS, it moves on after 5s automatically.
-  // The overall 25s cap means it ALWAYS reaches the waiting phase.
   useEffect(() => {
     if (phase !== "greeting" || greetingStarted) return;
     setGreetingStarted(true);
 
+    // Reset cancel flag for this new greeting session
+    speechCancelled.current = false;
+
     const runGreeting = async () => {
-      // Overall safety cap — always move to waiting within 25 seconds
       const overallCap = setTimeout(() => {
-        setPhase("waiting");
-        startJingle();
+        if (!speechCancelled.current) {
+          setPhase("waiting");
+          startJingle();
+        }
       }, 25000);
 
       try {
@@ -370,22 +364,27 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
         const pos  = callData?.queuePosition ?? 1;
         const mins = Math.max(1, pos);
 
-        // Each sentence spoken separately with its own 5s timeout
+        // Pass speechCancelled ref — loop stops the moment user cancels
         await speakAll([
           `${tod}! Welcome to Swift Naija Customer Support.`,
           "Please note that this call is being recorded for quality assurance and training purposes.",
           `You are number ${pos} in the queue.`,
           `Your estimated wait time is approximately ${mins} ${mins === 1 ? "minute" : "minutes"}.`,
           "Please stay on the line and we will connect you to an agent shortly.",
-        ]);
+        ], speechCancelled);
 
-        setLastQueuePos(pos);
+        if (!speechCancelled.current) {
+          setLastQueuePos(pos);
+        }
       } catch (e) {
         console.error("[Greeting]", e);
       } finally {
         clearTimeout(overallCap);
-        setPhase("waiting");
-        startJingle();
+        // Only move to waiting if not cancelled
+        if (!speechCancelled.current) {
+          setPhase("waiting");
+          startJingle();
+        }
       }
     };
 
@@ -408,7 +407,7 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
         (cur === "waiting" || cur === "greeting" || cur === "hold")
       ) {
         stopJingle();
-        window.speechSynthesis?.cancel();
+        stopAllSpeech();
         setPhase("connecting");
       }
 
@@ -420,14 +419,15 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
 
       if (data.status === "active" && cur === "hold" && dailyJoined.current) {
         stopJingle();
-        window.speechSynthesis?.cancel();
+        stopAllSpeech();
         setPhase("active");
+        speechCancelled.current = false;
         setTimeout(() => speak("Your agent has returned. Thank you for holding."), 500);
       }
 
       if (data.status === "ended" && cur !== "ended" && cur !== "rating") {
         stopJingle();
-        window.speechSynthesis?.cancel();
+        stopAllSpeech();
         cleanupDaily();
         setPhase("rating");
       }
@@ -467,6 +467,7 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
 
         call.on("joined-meeting", () => {
           dailyJoined.current = true;
+          speechCancelled.current = false;
           setPhase("active");
           setTimeout(() =>
             speak("You are now connected to a Swift Naija support agent. How can we help you today?"),
@@ -477,6 +478,7 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
           if (phaseRef.current !== "rating" && phaseRef.current !== "ended") {
             dailyJoined.current = false;
             stopJingle();
+            stopAllSpeech();
             setPhase("rating");
             cleanupDaily();
           }
@@ -515,8 +517,8 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     return () => {
       stopJingle();
+      stopAllSpeech();
       cleanupDaily();
-      window.speechSynthesis?.cancel();
     };
   }, []);
 
@@ -529,21 +531,24 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
   }, [muted]);
 
   const endCall = useCallback(async () => {
+    // Stop ALL speech and jingle immediately — first thing
+    stopAllSpeech();
     stopJingle();
-    window.speechSynthesis?.cancel();
     cleanupDaily();
+
     if (callId) {
       try {
         const end = httpsCallable(functions, "endSupportCall");
         await end({ callId });
       } catch (e) { console.error(e); }
     }
+
     if (phase === "active" || phase === "hold") {
       setPhase("rating");
     } else {
       setPhase("ended");
     }
-  }, [callId, phase, cleanupDaily, stopJingle]);
+  }, [callId, phase, cleanupDaily, stopJingle, stopAllSpeech]);
 
   // ── Rating screen ───────────────────────────────────────────────────────────
   if (phase === "rating") {
