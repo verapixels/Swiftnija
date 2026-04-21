@@ -54,7 +54,6 @@ function attachRemoteAudio(
     remoteAudioElements.set(participantId, el);
   }
   el.srcObject = new MediaStream([track]);
-  // Apply speaker device if supported (Chrome/Edge desktop)
   if (speakerDeviceId && typeof (el as any).setSinkId === "function") {
     (el as any).setSinkId(speakerDeviceId).catch(() => {});
   }
@@ -70,7 +69,6 @@ function removeAllRemoteAudio() {
   remoteAudioElements.forEach((_, id) => removeRemoteAudio(id));
 }
 
-// Apply a new speaker device to all currently playing remote audio elements
 function applyNewSpeakerToAll(speakerDeviceId: string) {
   remoteAudioElements.forEach(el => {
     if (typeof (el as any).setSinkId === "function") {
@@ -194,14 +192,12 @@ function AudioDeviceSheet({
         @keyframes sheet-bg { from { opacity: 0; } to { opacity: 1; } }
       `}</style>
 
-      {/* Backdrop */}
       <div onClick={onClose} style={{
         position: "fixed", inset: 0, zIndex: 10000,
         background: "rgba(0,0,0,0.55)",
         animation: "sheet-bg .2s ease",
       }} />
 
-      {/* Sheet */}
       <div style={{
         position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 10001,
         background: c.surf,
@@ -210,13 +206,11 @@ function AudioDeviceSheet({
         animation: "sheet-up .28s cubic-bezier(0.32,0.72,0,1)",
         maxHeight: "85vh", overflowY: "auto",
       }}>
-        {/* Drag handle */}
         <div style={{
           width: 40, height: 4, borderRadius: 4,
           background: c.dim, margin: "12px auto 0",
         }} />
 
-        {/* Header */}
         <div style={{
           display: "flex", alignItems: "center", justifyContent: "space-between",
           padding: "16px 20px 12px",
@@ -241,8 +235,6 @@ function AudioDeviceSheet({
         </div>
 
         <div style={{ padding: "16px 20px 24px" }}>
-
-          {/* Microphone section */}
           <div style={{ marginBottom: 24 }}>
             <div style={{
               display: "flex", alignItems: "center", gap: 8,
@@ -271,7 +263,6 @@ function AudioDeviceSheet({
             </div>
           </div>
 
-          {/* Speaker section */}
           <div>
             <div style={{
               display: "flex", alignItems: "center", gap: 8,
@@ -310,7 +301,6 @@ function AudioDeviceSheet({
               </div>
             )}
           </div>
-
         </div>
       </div>
     </>
@@ -451,13 +441,12 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
     dim:  dark ? "#30304a" : "#c0c0d8",
   };
 
-  const [phase,           setPhase]           = useState<CallPhase>("init");
-  const [callId,          setCallId]          = useState<string | null>(null);
-  const [callData,        setCallData]        = useState<CallData | null>(null);
-  const [muted,           setMuted]           = useState(false);
-  const [error,           setError]           = useState("");
-  const [lastQueuePos,    setLastQueuePos]    = useState<number | null>(null);
-  const [greetingStarted, setGreetingStarted] = useState(false);
+  const [phase,        setPhase]        = useState<CallPhase>("init");
+  const [callId,       setCallId]       = useState<string | null>(null);
+  const [callData,     setCallData]     = useState<CallData | null>(null);
+  const [muted,        setMuted]        = useState(false);
+  const [error,        setError]        = useState("");
+  const [lastQueuePos, setLastQueuePos] = useState<number | null>(null);
 
   // ── Audio device state ─────────────────────────────────────────────────────
   const [showDeviceSheet,       setShowDeviceSheet]       = useState(false);
@@ -469,13 +458,14 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
 
   const callObj         = useRef<DailyCall | null>(null);
   const jingleRef       = useRef<HTMLAudioElement | null>(null);
-  const greetAudioRef   = useRef<HTMLAudioElement | null>(null);
   const dailyJoined     = useRef(false);
   const phaseRef        = useRef<CallPhase>("init");
   const speechCancelled = useRef(false);
+  const callDataRef     = useRef<CallData | null>(null); // ref so handleTapToStart can read latest
   const callTimer       = useCallTimer(phase === "active");
 
   useEffect(() => { phaseRef.current = phase; }, [phase]);
+  useEffect(() => { callDataRef.current = callData; }, [callData]);
 
   // ── Pre-warm TTS voices ───────────────────────────────────────────────────
   useEffect(() => {
@@ -483,27 +473,19 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
   }, []);
 
   // ── Enumerate audio devices ───────────────────────────────────────────────
-  // Called after user gesture so mic permission is already granted and
-  // device labels will be populated (not just empty strings)
   const enumerateDevices = useCallback(async () => {
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
-
       const micList = devices
         .filter(d => d.kind === "audioinput")
         .map(d => ({ deviceId: d.deviceId, label: d.label }));
-
       const spkList = devices
         .filter(d => d.kind === "audiooutput")
         .map(d => ({ deviceId: d.deviceId, label: d.label }));
-
       setMics(micList);
       setSpeakers(spkList);
-
       if (micList.length > 0) setActiveMicId(micList[0].deviceId);
       if (spkList.length > 0) setActiveSpeakerId(spkList[0].deviceId);
-
-      // setSinkId is only available in Chrome/Edge on desktop
       const testEl = document.createElement("audio");
       setSupportsSpeakerSelect(typeof (testEl as any).setSinkId === "function");
     } catch (e) {
@@ -511,7 +493,7 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
     }
   }, []);
 
-  // ── Mic change: switch device mid-call via Daily API ─────────────────────
+  // ── Mic change ────────────────────────────────────────────────────────────
   const handleMicChange = useCallback(async (deviceId: string) => {
     setActiveMicId(deviceId);
     if (!callObj.current) return;
@@ -522,7 +504,7 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
     }
   }, []);
 
-  // ── Speaker change: apply setSinkId to all live audio elements ────────────
+  // ── Speaker change ────────────────────────────────────────────────────────
   const handleSpeakerChange = useCallback((deviceId: string) => {
     setActiveSpeakerId(deviceId);
     applyNewSpeakerToAll(deviceId);
@@ -532,11 +514,6 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
   const stopAllSpeech = useCallback(() => {
     speechCancelled.current = true;
     try { window.speechSynthesis?.cancel(); } catch { /**/ }
-    if (greetAudioRef.current) {
-      greetAudioRef.current.pause();
-      greetAudioRef.current.src = "";
-      greetAudioRef.current = null;
-    }
   }, []);
 
   // ── Jingle controls ───────────────────────────────────────────────────────
@@ -552,6 +529,7 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
     if (!jingleRef.current) return;
     jingleRef.current.pause(); jingleRef.current.src = ""; jingleRef.current = null;
   }, []);
+
   const pauseJingle  = useCallback(() => { jingleRef.current?.pause(); }, []);
   const resumeJingle = useCallback(() => { jingleRef.current?.play().catch(() => {}); }, []);
 
@@ -590,18 +568,26 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
       });
   }, []);
 
-  // ── STEP 2: Tap-to-start → unlock audio + request mic + enumerate devices ─
+  // ── STEP 2: Tap-to-start ─────────────────────────────────────────────────
+  // ALL audio is initiated here — iOS Safari requires audio to start
+  // within the same async chain as the user gesture (tap).
+  // Using useEffect to run speak() breaks iOS because the gesture context
+  // is lost by the time the effect fires.
   const handleTapToStart = useCallback(async () => {
-    // Unlock browser AudioContext (required for iOS Safari autoplay policy)
+    // 1. Unlock AudioContext — must be synchronous inside the tap
     try {
-      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-      await ctx.resume();
-      const buf = ctx.createBuffer(1, 1, 22050);
-      const src = ctx.createBufferSource();
-      src.buffer = buf; src.connect(ctx.destination); src.start(0);
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioCtx) {
+        const ctx = new AudioCtx();
+        await ctx.resume();
+        // Play a silent buffer to fully unlock audio on iOS
+        const buf = ctx.createBuffer(1, 1, 22050);
+        const src = ctx.createBufferSource();
+        src.buffer = buf; src.connect(ctx.destination); src.start(0);
+      }
     } catch { /**/ }
 
-    // Request mic permission now so device labels appear (not empty strings)
+    // 2. Request mic permission — get real device labels (not empty strings)
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       stream.getTracks().forEach(t => t.stop());
@@ -609,63 +595,71 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
 
     await enumerateDevices();
 
+    // 3. Prime speechSynthesis on iOS — iOS requires speak() to be called
+    //    at least once synchronously within a gesture to unlock TTS.
+    //    A silent utterance is enough.
+    if (window.speechSynthesis) {
+      try {
+        const primer = new SpeechSynthesisUtterance(" ");
+        primer.volume = 0;
+        window.speechSynthesis.speak(primer);
+        // Small wait so the primer registers before we cancel it
+        await new Promise(r => setTimeout(r, 80));
+        window.speechSynthesis.cancel();
+      } catch { /**/ }
+    }
+
     speechCancelled.current = false;
     setPhase("greeting");
-  }, [enumerateDevices]);
 
-  // ── STEP 3: Voice greeting ────────────────────────────────────────────────
-  useEffect(() => {
-    if (phase !== "greeting" || greetingStarted) return;
-    setGreetingStarted(true);
-    speechCancelled.current = false;
+    // 4. Run the FULL greeting here — still inside the gesture's async chain.
+    //    iOS keeps the audio unlock alive through awaits as long as execution
+    //    originates from the user tap. A useEffect detour breaks this.
+    const overallCap = setTimeout(() => {
+      if (!speechCancelled.current) { setPhase("waiting"); startJingle(); }
+    }, 35000);
 
-    const runGreeting = async () => {
-      const overallCap = setTimeout(() => {
-        if (!speechCancelled.current) { setPhase("waiting"); startJingle(); }
-      }, 35000);
+    try {
+      const h = new Date().getHours();
+      const tod =
+        h >= 5  && h < 12 ? "Good morning" :
+        h >= 12 && h < 17 ? "Good afternoon" : "Good evening";
 
-      try {
-        const h = new Date().getHours();
-        const tod =
-          h >= 5  && h < 12 ? "Good morning" :
-          h >= 12 && h < 17 ? "Good afternoon" : "Good evening";
-        const pos  = callData?.queuePosition ?? 1;
-        const mins = Math.max(1, pos);
+      // Read latest callData via ref (state may not have updated yet)
+      const pos  = callDataRef.current?.queuePosition ?? 1;
+      const mins = Math.max(1, pos);
 
-        if (speechCancelled.current) throw new Error("cancelled");
-        await speak(`${tod}! Welcome to`);
-        await gap(800);
+      if (speechCancelled.current) throw new Error("cancelled");
+      await speak(`${tod}! Welcome to`);
+      await gap(800);
 
-        if (speechCancelled.current) throw new Error("cancelled");
-        await playStorageAudio("support-audio/swift9javoice.mp4", speechCancelled);
-        await gap(400);
+      if (speechCancelled.current) throw new Error("cancelled");
+      await playStorageAudio("support-audio/swift9javoice.mp4", speechCancelled);
+      await gap(400);
 
-        if (speechCancelled.current) throw new Error("cancelled");
-        await speak("Please note that this call is being recorded for quality assurance and training purposes.");
-        await gap(350);
+      if (speechCancelled.current) throw new Error("cancelled");
+      await speak("Please note that this call is being recorded for quality assurance and training purposes.");
+      await gap(350);
 
-        if (speechCancelled.current) throw new Error("cancelled");
-        await speak(`You are number ${pos} in the queue.`);
-        await gap(350);
+      if (speechCancelled.current) throw new Error("cancelled");
+      await speak(`You are number ${pos} in the queue.`);
+      await gap(350);
 
-        if (speechCancelled.current) throw new Error("cancelled");
-        await speak(`Your estimated wait time is approximately ${mins} ${mins === 1 ? "minute" : "minutes"}.`);
-        await gap(350);
+      if (speechCancelled.current) throw new Error("cancelled");
+      await speak(`Your estimated wait time is approximately ${mins} ${mins === 1 ? "minute" : "minutes"}.`);
+      await gap(350);
 
-        if (speechCancelled.current) throw new Error("cancelled");
-        await speak("Please stay on the line and we will connect you to an agent shortly.");
+      if (speechCancelled.current) throw new Error("cancelled");
+      await speak("Please stay on the line and we will connect you to an agent shortly.");
 
-        if (!speechCancelled.current) setLastQueuePos(pos);
-      } catch { /**/ } finally {
-        clearTimeout(overallCap);
-        if (!speechCancelled.current) { setPhase("waiting"); startJingle(); }
-      }
-    };
+      if (!speechCancelled.current) setLastQueuePos(pos);
+    } catch { /**/ } finally {
+      clearTimeout(overallCap);
+      if (!speechCancelled.current) { setPhase("waiting"); startJingle(); }
+    }
+  }, [enumerateDevices, startJingle]);
 
-    runGreeting();
-  }, [phase, greetingStarted]);
-
-  // ── STEP 4: Firestore listener ────────────────────────────────────────────
+  // ── STEP 3: Firestore listener ────────────────────────────────────────────
   useEffect(() => {
     if (!callId) return;
     return onSnapshot(doc(db, "supportCalls", callId), snap => {
@@ -693,7 +687,7 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
     });
   }, [callId]);
 
-  // ── STEP 5: Re-announce queue position ───────────────────────────────────
+  // ── STEP 4: Re-announce queue position ───────────────────────────────────
   useEffect(() => {
     if (phase !== "waiting" || !callData) return;
     const pos = callData.queuePosition;
@@ -703,7 +697,7 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
     }
   }, [callData?.queuePosition, phase]);
 
-  // ── STEP 6: Connect Daily ─────────────────────────────────────────────────
+  // ── STEP 5: Connect Daily ─────────────────────────────────────────────────
   useEffect(() => {
     if (phase !== "connecting" || !callData?.roomUrl || !callData?.customerToken) return;
 
@@ -727,7 +721,6 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
         });
         callObj.current = call;
 
-        // Attach remote audio tracks with selected speaker
         call.on("track-started", (event) => {
           if (!event?.participant || event.participant.local) return;
           if (event.track?.kind !== "audio") return;
@@ -745,7 +738,6 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
         });
 
         call.on("joined-meeting", () => {
-          // Catch tracks already in the room when we join
           const participants = call.participants();
           Object.values(participants).forEach((p: any) => {
             if (p.local) return;
@@ -821,8 +813,7 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
     else setPhase("ended");
   }, [callId, phase, cleanupDaily, stopJingle, stopAllSpeech]);
 
-  // ── Short label helper for the device pill ────────────────────────────────
-  // Strips things like " (Built-in)" and " - USB Audio" for a tidy display
+  // ── Short label helper ────────────────────────────────────────────────────
   const shortLabel = (label?: string) => {
     if (!label) return null;
     return label.replace(/\s*[\(\-–].*/i, "").trim().slice(0, 22);
@@ -975,7 +966,6 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
         }
       `}</style>
 
-      {/* ── Audio device sheet (rendered above everything) ── */}
       {showDeviceSheet && (
         <AudioDeviceSheet
           mics={mics}
@@ -1059,7 +1049,7 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
             {phaseSubtitle[phase]}
           </div>
 
-          {/* ── Audio device selector pill ───────────────────────────────── */}
+          {/* Audio device selector pill */}
           {showDeviceButton && (
             <div style={{ marginBottom: 20 }}>
               <button
@@ -1079,7 +1069,6 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
                 }}
               >
                 <RiSettings3Line size={13} color={c.sub} />
-                {/* Mic label */}
                 <RiMicLine size={12} color={c.sub} />
                 <span style={{
                   maxWidth: 90, overflow: "hidden",
@@ -1087,7 +1076,6 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
                 }}>
                   {shortLabel(activeMicLabel) ?? "Default mic"}
                 </span>
-                {/* Speaker label — only if setSinkId is supported */}
                 {supportsSpeakerSelect && (
                   <>
                     <span style={{ color: c.dim, margin: "0 1px" }}>·</span>
