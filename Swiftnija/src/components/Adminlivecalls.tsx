@@ -12,7 +12,8 @@ import type { DailyCall } from "@daily-co/daily-js";
 import {
   RiPhoneLine, RiPhoneFill, RiMicLine, RiMicOffLine,
   RiHeadphoneLine, RiUserLine, RiTimeLine, RiLoader4Line,
-  RiCheckLine, RiPauseLine, RiPlayLine,
+  RiCheckLine, RiPauseLine, RiPlayLine, RiMoreLine,
+  RiMicFill, RiVolumeUpLine,
 } from "react-icons/ri";
 
 const ACCENT = "#FF6B00";
@@ -44,13 +45,17 @@ interface ActiveCallState {
   onHold: boolean;
 }
 
+interface MediaDeviceInfo2 {
+  deviceId: string;
+  label: string;
+  kind: string;
+}
+
 // Global Daily ref — persists across navigation
 let globalCallObj: DailyCall | null = null;
 let globalActiveCallId: string | null = null;
 
-// ── FIX: Track remote audio elements (agent side mirrors customer side fix) ───
-// Same root cause: Daily.co does not auto-play remote audio on mobile.
-// The agent's browser must also manually subscribe and play remote tracks.
+// ── Remote audio management ───────────────────────────────────────────────────
 const remoteAudioElements = new Map<string, HTMLAudioElement>();
 
 function attachRemoteAudio(participantId: string, track: MediaStreamTrack) {
@@ -103,6 +108,207 @@ function ago(ts?: { seconds: number } | null): string {
   return `${Math.floor(m / 60)}h ago`;
 }
 
+// ── Device selector hook ──────────────────────────────────────────────────────
+function useMediaDevices() {
+  const [mics, setMics]       = useState<MediaDeviceInfo2[]>([]);
+  const [speakers, setSpeakers] = useState<MediaDeviceInfo2[]>([]);
+  const [activeMic, setActiveMic]         = useState<string>("");
+  const [activeSpeaker, setActiveSpeaker] = useState<string>("");
+
+  const refresh = useCallback(async () => {
+    try {
+      // Request permission first so labels are visible
+      await navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => {});
+      const devices = await navigator.mediaDevices.enumerateDevices();
+
+      const micList = devices
+        .filter(d => d.kind === "audioinput")
+        .map(d => ({ deviceId: d.deviceId, label: d.label || `Microphone ${d.deviceId.slice(0, 6)}`, kind: d.kind }));
+
+      const spkList = devices
+        .filter(d => d.kind === "audiooutput")
+        .map(d => ({ deviceId: d.deviceId, label: d.label || `Speaker ${d.deviceId.slice(0, 6)}`, kind: d.kind }));
+
+      setMics(micList);
+      setSpeakers(spkList);
+
+      if (!activeMic && micList.length)     setActiveMic(micList[0].deviceId);
+      if (!activeSpeaker && spkList.length) setActiveSpeaker(spkList[0].deviceId);
+    } catch (e) {
+      console.warn("[Devices] enumerateDevices failed:", e);
+    }
+  }, [activeMic, activeSpeaker]);
+
+  useEffect(() => { refresh(); }, []);
+
+  const switchMic = useCallback(async (deviceId: string) => {
+    setActiveMic(deviceId);
+    if (!globalCallObj) return;
+    try {
+      await globalCallObj.setInputDevicesAsync({ audioDeviceId: deviceId });
+    } catch (e) { console.warn("[Devices] switchMic:", e); }
+  }, []);
+
+  const switchSpeaker = useCallback(async (deviceId: string) => {
+    setActiveSpeaker(deviceId);
+    // Apply to all remote audio elements via setSinkId
+    remoteAudioElements.forEach(async (el) => {
+      try {
+        if ("setSinkId" in el) {
+          await (el as any).setSinkId(deviceId);
+        }
+      } catch (e) { console.warn("[Devices] setSinkId:", e); }
+    });
+  }, []);
+
+  return { mics, speakers, activeMic, activeSpeaker, switchMic, switchSpeaker, refresh };
+}
+
+// ── Device Menu ───────────────────────────────────────────────────────────────
+function DeviceMenu({
+  mics, speakers, activeMic, activeSpeaker, onSwitchMic, onSwitchSpeaker, onClose, C,
+}: {
+  mics: MediaDeviceInfo2[];
+  speakers: MediaDeviceInfo2[];
+  activeMic: string;
+  activeSpeaker: string;
+  onSwitchMic: (id: string) => void;
+  onSwitchSpeaker: (id: string) => void;
+  onClose: () => void;
+  C: Record<string, string>;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Close on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    setTimeout(() => document.addEventListener("mousedown", handler), 0);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [onClose]);
+
+  const Section = ({ icon, label, items, activeId, onSelect }: {
+    icon: React.ReactNode;
+    label: string;
+    items: MediaDeviceInfo2[];
+    activeId: string;
+    onSelect: (id: string) => void;
+  }) => (
+    <div style={{ marginBottom: items.length ? 12 : 0 }}>
+      <div style={{
+        display: "flex", alignItems: "center", gap: 6,
+        fontSize: 10, fontWeight: 800, color: C.muted,
+        textTransform: "uppercase", letterSpacing: 0.8,
+        marginBottom: 6, padding: "0 4px",
+      }}>
+        {icon}
+        {label}
+      </div>
+      {items.length === 0 ? (
+        <div style={{ fontSize: 12, color: C.muted, padding: "4px 8px", opacity: 0.6 }}>
+          No devices found
+        </div>
+      ) : (
+        items.map(device => {
+          const isActive = device.deviceId === activeId;
+          return (
+            <button
+              key={device.deviceId}
+              onClick={() => { onSelect(device.deviceId); onClose(); }}
+              style={{
+                width: "100%", textAlign: "left",
+                display: "flex", alignItems: "center", gap: 10,
+                padding: "9px 10px", borderRadius: 10,
+                border: "none",
+                background: isActive ? "rgba(255,107,0,0.12)" : "transparent",
+                color: isActive ? ACCENT : C.text,
+                cursor: "pointer", fontSize: 13, fontWeight: isActive ? 700 : 500,
+                transition: "background .15s",
+              }}
+              onMouseEnter={e => {
+                if (!isActive) (e.currentTarget as HTMLElement).style.background = C.surface2 || "rgba(255,255,255,0.06)";
+              }}
+              onMouseLeave={e => {
+                if (!isActive) (e.currentTarget as HTMLElement).style.background = "transparent";
+              }}
+            >
+              {/* Active checkmark */}
+              <span style={{
+                width: 16, height: 16, borderRadius: "50%", flexShrink: 0,
+                border: `2px solid ${isActive ? ACCENT : C.border || "rgba(255,255,255,0.2)"}`,
+                background: isActive ? ACCENT : "transparent",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                transition: "all .15s",
+              }}>
+                {isActive && <RiCheckLine size={9} color="white" />}
+              </span>
+              <span style={{
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+              }}>
+                {device.label}
+              </span>
+            </button>
+          );
+        })
+      )}
+    </div>
+  );
+
+  return (
+    <div
+      ref={ref}
+      style={{
+        position: "absolute",
+        bottom: "calc(100% + 10px)",
+        right: 0,
+        zIndex: 100000,
+        background: C.modalBg,
+        border: `1.5px solid ${C.border || "rgba(255,255,255,0.12)"}`,
+        borderRadius: 16,
+        padding: "14px 12px",
+        minWidth: 260,
+        maxWidth: 320,
+        boxShadow: "0 16px 48px rgba(0,0,0,0.5)",
+        backdropFilter: "blur(20px)",
+        animation: "slideUp .18s ease",
+      }}
+    >
+      <Section
+        icon={<RiMicFill size={10} />}
+        label="Microphone"
+        items={mics}
+        activeId={activeMic}
+        onSelect={onSwitchMic}
+      />
+
+      {/* Divider */}
+      {mics.length > 0 && speakers.length > 0 && (
+        <div style={{
+          height: 1,
+          background: C.border || "rgba(255,255,255,0.08)",
+          margin: "10px 0",
+        }} />
+      )}
+
+      <Section
+        icon={<RiVolumeUpLine size={10} />}
+        label="Speaker"
+        items={speakers}
+        activeId={activeSpeaker}
+        onSelect={onSwitchSpeaker}
+      />
+
+      <style>{`
+        @keyframes slideUp {
+          from { opacity: 0; transform: translateY(8px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
+    </div>
+  );
+}
+
 // ── In-call floating bar ──────────────────────────────────────────────────────
 function ActiveCallBar({
   state,
@@ -118,6 +324,17 @@ function ActiveCallBar({
   C: Record<string, string>;
 }) {
   const timer = useTimer(true);
+  const [showDeviceMenu, setShowDeviceMenu] = useState(false);
+  const deviceMenuAnchorRef = useRef<HTMLDivElement>(null);
+
+  const {
+    mics, speakers, activeMic, activeSpeaker, switchMic, switchSpeaker, refresh,
+  } = useMediaDevices();
+
+  const handleOpenDeviceMenu = () => {
+    refresh(); // re-enumerate in case devices changed
+    setShowDeviceMenu(v => !v);
+  };
 
   return (
     <div style={{
@@ -179,6 +396,38 @@ function ActiveCallBar({
       >
         {state.muted ? <RiMicOffLine size={18} /> : <RiMicLine size={18} />}
       </button>
+
+      {/* ⋮ Device picker */}
+      <div ref={deviceMenuAnchorRef} style={{ position: "relative" }}>
+        <button
+          onClick={handleOpenDeviceMenu}
+          title="Switch microphone or speaker"
+          style={{
+            width: 42, height: 42, borderRadius: "50%",
+            border: `1.5px solid ${showDeviceMenu ? "rgba(255,107,0,0.5)" : C.border}`,
+            background: showDeviceMenu ? "rgba(255,107,0,0.12)" : C.surface2,
+            color: showDeviceMenu ? ACCENT : C.textSub,
+            cursor: "pointer",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            transition: "all .2s", fontSize: 0,
+          }}
+        >
+          <RiMoreLine size={18} />
+        </button>
+
+        {showDeviceMenu && (
+          <DeviceMenu
+            mics={mics}
+            speakers={speakers}
+            activeMic={activeMic}
+            activeSpeaker={activeSpeaker}
+            onSwitchMic={switchMic}
+            onSwitchSpeaker={switchSpeaker}
+            onClose={() => setShowDeviceMenu(false)}
+            C={C}
+          />
+        )}
+      </div>
 
       {/* End */}
       <button
@@ -290,17 +539,14 @@ export default function AdminLiveCalls({ C }: { C: Record<string, string> }) {
       const call = DailyIframe.createCallObject({
         audioSource: true,
         videoSource: false,
-        // FIX: same subscription fix as customer side
         subscribeToTracksAutomatically: true,
       });
       globalCallObj      = call;
       globalActiveCallId = callId;
 
-      // FIX: attach remote audio tracks as they arrive
       call.on("track-started", (event) => {
         if (!event?.participant || event.participant.local) return;
         if (event.track?.kind !== "audio") return;
-        console.log("[Admin Daily] Remote audio track started:", event.participant.session_id);
         attachRemoteAudio(event.participant.session_id, event.track);
       });
 
@@ -317,9 +563,8 @@ export default function AdminLiveCalls({ C }: { C: Record<string, string> }) {
       });
 
       call.on("joined-meeting", () => {
-        // Also catch tracks already present when we join
         const participants = call.participants();
-        Object.values(participants).forEach((p) => {
+        Object.values(participants).forEach((p: any) => {
           if (p.local) return;
           const audioTrack = p.tracks?.audio?.persistentTrack;
           if (audioTrack && audioTrack.readyState === "live") {
@@ -329,10 +574,12 @@ export default function AdminLiveCalls({ C }: { C: Record<string, string> }) {
       });
 
       call.on("left-meeting", () => {
+        removeAllRemoteAudio();
         endActiveCall(callId);
       });
 
       call.on("error", () => {
+        removeAllRemoteAudio();
         toast("Connection error during call.");
         endActiveCall(callId);
       });

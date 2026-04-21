@@ -218,6 +218,8 @@ export default function VendorDashboard() {
   const pendingOrders = orders.filter(o => o.status === "pending").length;
 
   
+
+  
   // ── Init: request push permission, register SW, unlock audio ─────────────────
 useEffect(() => {
   registerServiceWorker();

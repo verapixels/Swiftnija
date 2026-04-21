@@ -37,6 +37,7 @@ import LandingPage from "./Pages/Landingpage";
 import   ResetPassword from "./Pages/ResetPassword";
 import { VendorCartPage } from "./Pages/CustomerOrdersPage";
 import UserOrderHistory from "./Pages/Userorderhistory";
+import AdminEntityDetailPage from "./Pages/Adminentitydetailpage";
 
 
 function OrderTrackingWrapper() {
@@ -190,6 +191,10 @@ export default function App() {
         <Route path="/admin-signup" element={<AdminSignupPage />} />
         <Route path="/admin"        element={<SwiftAdminDashboard />} />
         <Route path="/superadmin"   element={<AdminDashboard />} />
+
+<Route path="/admin/user/:id"   element={<AdminEntityDetailPage entityType="user"   />} />
+<Route path="/admin/vendor/:id" element={<AdminEntityDetailPage entityType="vendor" />} />
+<Route path="/admin/rider/:id"  element={<AdminEntityDetailPage entityType="rider"  />} />
 
         {/* ── Auth routes ── */}
         <Route path="/signup" element={<UserSignup />} />

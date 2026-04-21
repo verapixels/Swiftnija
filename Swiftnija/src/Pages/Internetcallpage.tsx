@@ -10,7 +10,8 @@ import type { DailyCall } from "@daily-co/daily-js";
 import {
   RiPhoneFill, RiMicLine, RiMicOffLine,
   RiHeadphoneLine, RiUserLine, RiTimeLine, RiLoader4Line,
-  RiStarFill, RiStarLine,
+  RiStarFill, RiStarLine, RiSettings3Line, RiCloseLine,
+  RiVolumeUpLine, RiCheckLine, RiArrowDownSLine,
 } from "react-icons/ri";
 
 const ACCENT = "#FF6B00";
@@ -18,7 +19,7 @@ const functions = getFunctions(undefined, "us-central1");
 const storage = getStorage();
 
 type CallPhase =
-  | "init" | "greeting" | "waiting" | "connecting"
+  | "init" | "tap_to_start" | "greeting" | "waiting" | "connecting"
   | "active" | "hold" | "ended" | "rating" | "error";
 
 interface CallData {
@@ -31,63 +32,96 @@ interface CallData {
   customerToken?: string;
 }
 
+interface AudioDevice {
+  deviceId: string;
+  label: string;
+}
+
+// ── Remote audio management ──────────────────────────────────────────────────
+const remoteAudioElements = new Map<string, HTMLAudioElement>();
+
+function attachRemoteAudio(
+  participantId: string,
+  track: MediaStreamTrack,
+  speakerDeviceId?: string
+) {
+  let el = remoteAudioElements.get(participantId);
+  if (!el) {
+    el = document.createElement("audio");
+    el.autoplay = true;
+    el.setAttribute("playsinline", "true");
+    document.body.appendChild(el);
+    remoteAudioElements.set(participantId, el);
+  }
+  el.srcObject = new MediaStream([track]);
+  // Apply speaker device if supported (Chrome/Edge desktop)
+  if (speakerDeviceId && typeof (el as any).setSinkId === "function") {
+    (el as any).setSinkId(speakerDeviceId).catch(() => {});
+  }
+  el.play().catch(err => console.warn("[Customer Audio] play failed:", err));
+}
+
+function removeRemoteAudio(participantId: string) {
+  const el = remoteAudioElements.get(participantId);
+  if (el) { el.srcObject = null; el.remove(); remoteAudioElements.delete(participantId); }
+}
+
+function removeAllRemoteAudio() {
+  remoteAudioElements.forEach((_, id) => removeRemoteAudio(id));
+}
+
+// Apply a new speaker device to all currently playing remote audio elements
+function applyNewSpeakerToAll(speakerDeviceId: string) {
+  remoteAudioElements.forEach(el => {
+    if (typeof (el as any).setSinkId === "function") {
+      (el as any).setSinkId(speakerDeviceId).catch(() => {});
+    }
+  });
+}
+
 // ── Play a Firebase Storage audio file ───────────────────────────────────────
-// Returns the Audio element so caller can stop it if needed
 async function playStorageAudio(
   path: string,
   cancelledRef: React.MutableRefObject<boolean>
 ): Promise<void> {
   return new Promise(async resolve => {
     if (cancelledRef.current) { resolve(); return; }
-
-    // 5 second safety timeout
-    const timeout = setTimeout(() => resolve(), 5000);
+    const timeout = setTimeout(() => resolve(), 7000);
     const done = () => { clearTimeout(timeout); resolve(); };
-
     try {
       const storageRef = ref(storage, path);
-      const url        = await getDownloadURL(storageRef);
+      const url = await getDownloadURL(storageRef);
       if (cancelledRef.current) { done(); return; }
-
       const audio = new Audio(url);
-      audio.onended  = done;
-      audio.onerror  = done;
+      audio.onended = done; audio.onerror = done;
       await audio.play();
-    } catch {
-      done();
-    }
+    } catch { done(); }
   });
 }
 
-// ── speak() — TTS for sentences, guaranteed to resolve ───────────────────────
+// ── speak() ──────────────────────────────────────────────────────────────────
 function speak(text: string, rate = 0.88, pitch = 1.05): Promise<void> {
   return new Promise(resolve => {
-    const hardTimeout = setTimeout(() => resolve(), 5000);
+    const hardTimeout = setTimeout(() => resolve(), 6000);
     const done = () => { clearTimeout(hardTimeout); resolve(); };
-
     if (!window.speechSynthesis) { done(); return; }
     try { window.speechSynthesis.cancel(); } catch { /**/ }
 
     const trySpeak = () => {
-      const utt   = new SpeechSynthesisUtterance(text);
-      utt.rate    = rate;
-      utt.pitch   = pitch;
-      utt.volume  = 1;
-      utt.onend   = done;
-      utt.onerror = done;
-
+      const utt = new SpeechSynthesisUtterance(text);
+      utt.rate = rate; utt.pitch = pitch; utt.volume = 1;
+      utt.onend = done; utt.onerror = done;
       const voices = window.speechSynthesis.getVoices();
-      const voice  =
-        voices.find(v => v.lang === "en-NG")                                                  ||
-        voices.find(v => v.lang === "en-GH")                                                  ||
-        voices.find(v => v.lang === "en-ZA" && !v.name.toLowerCase().includes("male"))        ||
-        voices.find(v => v.name === "Google UK English Female")                               ||
-        voices.find(v => v.name === "Microsoft Zira Desktop - English (United States)")       ||
-        voices.find(v => v.name === "Samantha")                                               ||
+      const voice =
+        voices.find(v => v.lang === "en-NG") ||
+        voices.find(v => v.lang === "en-GH") ||
+        voices.find(v => v.lang === "en-ZA" && !v.name.toLowerCase().includes("male")) ||
+        voices.find(v => v.name === "Google UK English Female") ||
+        voices.find(v => v.name === "Microsoft Zira Desktop - English (United States)") ||
+        voices.find(v => v.name === "Samantha") ||
         voices.find(v => v.name.toLowerCase().includes("female") && v.lang.startsWith("en")) ||
-        voices.find(v => v.lang === "en-GB" && !v.name.toLowerCase().includes("male"))        ||
+        voices.find(v => v.lang === "en-GB" && !v.name.toLowerCase().includes("male")) ||
         voices.find(v => v.lang.startsWith("en"));
-
       if (voice) utt.voice = voice;
       try { window.speechSynthesis.speak(utt); } catch { done(); }
     };
@@ -95,7 +129,7 @@ function speak(text: string, rate = 0.88, pitch = 1.05): Promise<void> {
     if (window.speechSynthesis.getVoices().length > 0) {
       trySpeak();
     } else {
-      const fallback = setTimeout(trySpeak, 800);
+      const fallback = setTimeout(trySpeak, 1500);
       window.speechSynthesis.onvoiceschanged = () => {
         clearTimeout(fallback);
         window.speechSynthesis.onvoiceschanged = null;
@@ -105,29 +139,23 @@ function speak(text: string, rate = 0.88, pitch = 1.05): Promise<void> {
   });
 }
 
-// ── gap between sentences ─────────────────────────────────────────────────────
 function gap(ms = 350): Promise<void> {
   return new Promise(r => setTimeout(r, ms));
 }
 
-// ── Jingle ────────────────────────────────────────────────────────────────────
 async function createJingle(): Promise<HTMLAudioElement | null> {
   try {
-    const r     = ref(storage, "support-audio/hold-jingle.mp3.mp4");
-    const url   = await getDownloadURL(r);
+    const r = ref(storage, "support-audio/hold-jingle.mp3.mp4");
+    const url = await getDownloadURL(r);
     const audio = new Audio(url);
-    audio.loop   = true;
-    audio.volume = 0.45;
+    audio.loop = true; audio.volume = 0.45;
     audio.addEventListener("canplay", () => {
       if (audio.currentTime === 0) audio.currentTime = 3;
     }, { once: true });
     return audio;
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
-// ── Call timer ────────────────────────────────────────────────────────────────
 function useCallTimer(running: boolean) {
   const [secs, setSecs] = useState(0);
   useEffect(() => {
@@ -140,15 +168,188 @@ function useCallTimer(running: boolean) {
   return `${mm}:${ss}`;
 }
 
+// ── Audio Device Picker Sheet ────────────────────────────────────────────────
+function AudioDeviceSheet({
+  mics, speakers, activeMicId, activeSpeakerId,
+  onMicChange, onSpeakerChange, onClose, c, dark, supportsSpeakerSelection,
+}: {
+  mics: AudioDevice[];
+  speakers: AudioDevice[];
+  activeMicId: string;
+  activeSpeakerId: string;
+  onMicChange: (id: string) => void;
+  onSpeakerChange: (id: string) => void;
+  onClose: () => void;
+  c: Record<string, string>;
+  dark: boolean;
+  supportsSpeakerSelection: boolean;
+}) {
+  return (
+    <>
+      <style>{`
+        @keyframes sheet-up {
+          from { transform: translateY(100%); opacity: 0; }
+          to   { transform: translateY(0);    opacity: 1; }
+        }
+        @keyframes sheet-bg { from { opacity: 0; } to { opacity: 1; } }
+      `}</style>
+
+      {/* Backdrop */}
+      <div onClick={onClose} style={{
+        position: "fixed", inset: 0, zIndex: 10000,
+        background: "rgba(0,0,0,0.55)",
+        animation: "sheet-bg .2s ease",
+      }} />
+
+      {/* Sheet */}
+      <div style={{
+        position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 10001,
+        background: c.surf,
+        borderRadius: "24px 24px 0 0",
+        padding: "0 0 env(safe-area-inset-bottom,16px)",
+        animation: "sheet-up .28s cubic-bezier(0.32,0.72,0,1)",
+        maxHeight: "85vh", overflowY: "auto",
+      }}>
+        {/* Drag handle */}
+        <div style={{
+          width: 40, height: 4, borderRadius: 4,
+          background: c.dim, margin: "12px auto 0",
+        }} />
+
+        {/* Header */}
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "16px 20px 12px",
+          borderBottom: `1px solid ${c.brd}`,
+        }}>
+          <div style={{
+            display: "flex", alignItems: "center", gap: 10,
+            fontFamily: "'Syne',sans-serif", fontWeight: 900,
+            fontSize: 16, color: c.txt,
+          }}>
+            <RiSettings3Line size={18} color={ACCENT} />
+            Audio Settings
+          </div>
+          <button onClick={onClose} style={{
+            background: c.brd, border: "none", borderRadius: "50%",
+            width: 30, height: 30, cursor: "pointer",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            color: c.sub, fontSize: 0,
+          }}>
+            <RiCloseLine size={16} />
+          </button>
+        </div>
+
+        <div style={{ padding: "16px 20px 24px" }}>
+
+          {/* Microphone section */}
+          <div style={{ marginBottom: 24 }}>
+            <div style={{
+              display: "flex", alignItems: "center", gap: 8,
+              fontSize: 11, fontWeight: 800, color: c.sub,
+              textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 10,
+            }}>
+              <RiMicLine size={13} color={c.sub} />
+              Microphone
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {mics.length === 0 ? (
+                <div style={{
+                  fontSize: 13, color: c.sub, padding: "12px 14px",
+                  background: dark ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.03)",
+                  borderRadius: 12, border: `1px solid ${c.brd}`,
+                }}>No microphones found</div>
+              ) : mics.map(mic => (
+                <DeviceOption
+                  key={mic.deviceId}
+                  label={mic.label || `Microphone ${mic.deviceId.slice(0, 6)}`}
+                  active={activeMicId === mic.deviceId}
+                  onClick={() => onMicChange(mic.deviceId)}
+                  c={c}
+                />
+              ))}
+            </div>
+          </div>
+
+          {/* Speaker section */}
+          <div>
+            <div style={{
+              display: "flex", alignItems: "center", gap: 8,
+              fontSize: 11, fontWeight: 800, color: c.sub,
+              textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 10,
+            }}>
+              <RiVolumeUpLine size={13} color={c.sub} />
+              Speaker / Output
+            </div>
+            {!supportsSpeakerSelection ? (
+              <div style={{
+                fontSize: 13, color: c.sub, padding: "12px 14px",
+                background: dark ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.03)",
+                borderRadius: 12, border: `1px solid ${c.brd}`, lineHeight: 1.6,
+              }}>
+                Speaker selection works on Chrome and Edge on desktop.<br />
+                On mobile, use your device's volume/audio buttons.
+              </div>
+            ) : speakers.length === 0 ? (
+              <div style={{
+                fontSize: 13, color: c.sub, padding: "12px 14px",
+                background: dark ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.03)",
+                borderRadius: 12, border: `1px solid ${c.brd}`,
+              }}>No speakers found</div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {speakers.map(spk => (
+                  <DeviceOption
+                    key={spk.deviceId}
+                    label={spk.label || `Speaker ${spk.deviceId.slice(0, 6)}`}
+                    active={activeSpeakerId === spk.deviceId}
+                    onClick={() => onSpeakerChange(spk.deviceId)}
+                    c={c}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+
+        </div>
+      </div>
+    </>
+  );
+}
+
+function DeviceOption({
+  label, active, onClick, c,
+}: {
+  label: string; active: boolean; onClick: () => void; c: Record<string, string>;
+}) {
+  return (
+    <button onClick={onClick} style={{
+      width: "100%", textAlign: "left",
+      display: "flex", alignItems: "center", justifyContent: "space-between",
+      padding: "12px 14px", borderRadius: 12, cursor: "pointer",
+      border: active ? `1.5px solid rgba(255,107,0,0.5)` : `1.5px solid ${c.brd}`,
+      background: active ? "rgba(255,107,0,0.07)" : "transparent",
+      transition: "all .15s",
+      fontFamily: "'DM Sans',sans-serif",
+    }}>
+      <span style={{
+        fontSize: 13, fontWeight: active ? 700 : 500,
+        color: active ? ACCENT : c.txt,
+        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "90%",
+      }}>
+        {label}
+      </span>
+      {active && <RiCheckLine size={16} color={ACCENT} />}
+    </button>
+  );
+}
+
 // ── Star Rating ───────────────────────────────────────────────────────────────
 function StarRating({
   agentName, callId, onDone, dark, c,
 }: {
-  agentName: string;
-  callId: string;
-  onDone: () => void;
-  dark: boolean;
-  c: Record<string, string>;
+  agentName: string; callId: string; onDone: () => void;
+  dark: boolean; c: Record<string, string>;
 }) {
   const [hovered,    setHovered]    = useState(0);
   const [selected,   setSelected]   = useState(0);
@@ -157,14 +358,12 @@ function StarRating({
   const labels = ["", "Poor", "Fair", "Good", "Great", "Excellent!"];
 
   const submit = async (star: number) => {
-    setSelected(star);
-    setSubmitting(true);
+    setSelected(star); setSubmitting(true);
     try {
       const rate = httpsCallable(functions, "rateSupportCall");
       await rate({ callId, rating: star });
     } catch { /**/ }
-    setSubmitted(true);
-    setSubmitting(false);
+    setSubmitted(true); setSubmitting(false);
     setTimeout(onDone, 1600);
   };
 
@@ -260,21 +459,79 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
   const [lastQueuePos,    setLastQueuePos]    = useState<number | null>(null);
   const [greetingStarted, setGreetingStarted] = useState(false);
 
+  // ── Audio device state ─────────────────────────────────────────────────────
+  const [showDeviceSheet,       setShowDeviceSheet]       = useState(false);
+  const [mics,                  setMics]                  = useState<AudioDevice[]>([]);
+  const [speakers,              setSpeakers]              = useState<AudioDevice[]>([]);
+  const [activeMicId,           setActiveMicId]           = useState<string>("");
+  const [activeSpeakerId,       setActiveSpeakerId]       = useState<string>("");
+  const [supportsSpeakerSelect, setSupportsSpeakerSelect] = useState(false);
+
   const callObj         = useRef<DailyCall | null>(null);
   const jingleRef       = useRef<HTMLAudioElement | null>(null);
-  const greetAudioRef   = useRef<HTMLAudioElement | null>(null); // track greeting audio
+  const greetAudioRef   = useRef<HTMLAudioElement | null>(null);
   const dailyJoined     = useRef(false);
   const phaseRef        = useRef<CallPhase>("init");
-  const speechCancelled = useRef(false); // ← instant kill switch for all audio
+  const speechCancelled = useRef(false);
   const callTimer       = useCallTimer(phase === "active");
 
   useEffect(() => { phaseRef.current = phase; }, [phase]);
 
-  // ── stopAllSpeech — kills TTS AND any playing greeting audio ─────────────
+  // ── Pre-warm TTS voices ───────────────────────────────────────────────────
+  useEffect(() => {
+    if (window.speechSynthesis) window.speechSynthesis.getVoices();
+  }, []);
+
+  // ── Enumerate audio devices ───────────────────────────────────────────────
+  // Called after user gesture so mic permission is already granted and
+  // device labels will be populated (not just empty strings)
+  const enumerateDevices = useCallback(async () => {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+
+      const micList = devices
+        .filter(d => d.kind === "audioinput")
+        .map(d => ({ deviceId: d.deviceId, label: d.label }));
+
+      const spkList = devices
+        .filter(d => d.kind === "audiooutput")
+        .map(d => ({ deviceId: d.deviceId, label: d.label }));
+
+      setMics(micList);
+      setSpeakers(spkList);
+
+      if (micList.length > 0) setActiveMicId(micList[0].deviceId);
+      if (spkList.length > 0) setActiveSpeakerId(spkList[0].deviceId);
+
+      // setSinkId is only available in Chrome/Edge on desktop
+      const testEl = document.createElement("audio");
+      setSupportsSpeakerSelect(typeof (testEl as any).setSinkId === "function");
+    } catch (e) {
+      console.warn("[Devices] enumeration failed:", e);
+    }
+  }, []);
+
+  // ── Mic change: switch device mid-call via Daily API ─────────────────────
+  const handleMicChange = useCallback(async (deviceId: string) => {
+    setActiveMicId(deviceId);
+    if (!callObj.current) return;
+    try {
+      await (callObj.current as any).setInputDevicesAsync({ audioDeviceId: deviceId });
+    } catch (e) {
+      console.warn("[Devices] mic switch failed:", e);
+    }
+  }, []);
+
+  // ── Speaker change: apply setSinkId to all live audio elements ────────────
+  const handleSpeakerChange = useCallback((deviceId: string) => {
+    setActiveSpeakerId(deviceId);
+    applyNewSpeakerToAll(deviceId);
+  }, []);
+
+  // ── stopAllSpeech ─────────────────────────────────────────────────────────
   const stopAllSpeech = useCallback(() => {
     speechCancelled.current = true;
     try { window.speechSynthesis?.cancel(); } catch { /**/ }
-    // Also stop any greeting audio clip that's playing
     if (greetAudioRef.current) {
       greetAudioRef.current.pause();
       greetAudioRef.current.src = "";
@@ -291,29 +548,22 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
     try { await audio.play(); } catch (e) { console.warn("[Jingle]", e); }
   }, []);
 
-  const stopJingle = useCallback(() => {
+  const stopJingle   = useCallback(() => {
     if (!jingleRef.current) return;
-    jingleRef.current.pause();
-    jingleRef.current.src = "";
-    jingleRef.current = null;
+    jingleRef.current.pause(); jingleRef.current.src = ""; jingleRef.current = null;
   }, []);
-
   const pauseJingle  = useCallback(() => { jingleRef.current?.pause(); }, []);
   const resumeJingle = useCallback(() => { jingleRef.current?.play().catch(() => {}); }, []);
 
   // ── Queue speech ──────────────────────────────────────────────────────────
-  const buildQueueSpeech = (pos: number) => {
+  const announceQueue = useCallback(async (pos: number) => {
     const mins = Math.max(1, pos);
-    return (
+    pauseJingle();
+    await speak(
       `You are number ${pos} in the queue. ` +
       `Your estimated wait time is approximately ${mins} ${mins === 1 ? "minute" : "minutes"}. ` +
       `Please stay on the line and we will connect you to an agent shortly.`
     );
-  };
-
-  const announceQueue = useCallback(async (pos: number) => {
-    pauseJingle();
-    await speak(buildQueueSpeech(pos));
     resumeJingle();
   }, [pauseJingle, resumeJingle]);
 
@@ -332,7 +582,7 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
       .then(res => {
         if (!res.data.success) throw new Error("Room creation failed");
         setCallId(res.data.callId);
-        setPhase("greeting");
+        setPhase("tap_to_start");
       })
       .catch(err => {
         setError(err.message ?? "Could not start call.");
@@ -340,122 +590,110 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
       });
   }, []);
 
-  // ── STEP 2: Voice greeting ────────────────────────────────────────────────
-  // NEW: plays your real swift9javoice.mp4 recording for the brand name.
-  // All other sentences use TTS. Each step checks speechCancelled before running.
+  // ── STEP 2: Tap-to-start → unlock audio + request mic + enumerate devices ─
+  const handleTapToStart = useCallback(async () => {
+    // Unlock browser AudioContext (required for iOS Safari autoplay policy)
+    try {
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      await ctx.resume();
+      const buf = ctx.createBuffer(1, 1, 22050);
+      const src = ctx.createBufferSource();
+      src.buffer = buf; src.connect(ctx.destination); src.start(0);
+    } catch { /**/ }
+
+    // Request mic permission now so device labels appear (not empty strings)
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach(t => t.stop());
+    } catch { /**/ }
+
+    await enumerateDevices();
+
+    speechCancelled.current = false;
+    setPhase("greeting");
+  }, [enumerateDevices]);
+
+  // ── STEP 3: Voice greeting ────────────────────────────────────────────────
   useEffect(() => {
     if (phase !== "greeting" || greetingStarted) return;
     setGreetingStarted(true);
     speechCancelled.current = false;
 
     const runGreeting = async () => {
-      // Hard overall cap — always move to waiting within 30 seconds
       const overallCap = setTimeout(() => {
-        if (!speechCancelled.current) {
-          setPhase("waiting");
-          startJingle();
-        }
-      }, 30000);
+        if (!speechCancelled.current) { setPhase("waiting"); startJingle(); }
+      }, 35000);
 
       try {
-        const h   = new Date().getHours();
+        const h = new Date().getHours();
         const tod =
           h >= 5  && h < 12 ? "Good morning" :
-          h >= 12 && h < 17 ? "Good afternoon" :
-          "Good evening";
-
+          h >= 12 && h < 17 ? "Good afternoon" : "Good evening";
         const pos  = callData?.queuePosition ?? 1;
         const mins = Math.max(1, pos);
 
-         // 1. Time of day greeting + "welcome to" using TTS
-         if (speechCancelled.current) throw new Error("cancelled");
-await speak(`${tod}! Welcome to`);
-await gap(150);
+        if (speechCancelled.current) throw new Error("cancelled");
+        await speak(`${tod}! Welcome to`);
+        await gap(800);
 
-// 2. Play YOUR real recording for "Swift9ja Customer Support"
-if (speechCancelled.current) throw new Error("cancelled");
-await playStorageAudio("support-audio/swift9javoice.mp4", speechCancelled);
-        await gap();
+        if (speechCancelled.current) throw new Error("cancelled");
+        await playStorageAudio("support-audio/swift9javoice.mp4", speechCancelled);
+        await gap(400);
 
-        // 3. Recording notice using TTS
         if (speechCancelled.current) throw new Error("cancelled");
         await speak("Please note that this call is being recorded for quality assurance and training purposes.");
-        await gap();
+        await gap(350);
 
-        // 4. Queue position using TTS
         if (speechCancelled.current) throw new Error("cancelled");
         await speak(`You are number ${pos} in the queue.`);
-        await gap();
+        await gap(350);
 
-        // 5. Wait time using TTS
         if (speechCancelled.current) throw new Error("cancelled");
         await speak(`Your estimated wait time is approximately ${mins} ${mins === 1 ? "minute" : "minutes"}.`);
-        await gap();
+        await gap(350);
 
-        // 6. Hold message using TTS
         if (speechCancelled.current) throw new Error("cancelled");
         await speak("Please stay on the line and we will connect you to an agent shortly.");
 
         if (!speechCancelled.current) setLastQueuePos(pos);
-
-      } catch {
-        // Either cancelled or error — move on
-      } finally {
+      } catch { /**/ } finally {
         clearTimeout(overallCap);
-        if (!speechCancelled.current) {
-          setPhase("waiting");
-          startJingle();
-        }
+        if (!speechCancelled.current) { setPhase("waiting"); startJingle(); }
       }
     };
 
     runGreeting();
   }, [phase, greetingStarted]);
 
-  // ── STEP 3: Firestore listener ────────────────────────────────────────────
+  // ── STEP 4: Firestore listener ────────────────────────────────────────────
   useEffect(() => {
     if (!callId) return;
-
     return onSnapshot(doc(db, "supportCalls", callId), snap => {
       if (!snap.exists()) return;
       const data = snap.data() as CallData;
       setCallData(data);
       const cur = phaseRef.current;
 
-      if (
-        data.status === "active" &&
-        !dailyJoined.current &&
-        (cur === "waiting" || cur === "greeting" || cur === "hold")
-      ) {
-        stopJingle();
-        stopAllSpeech();
-        setPhase("connecting");
+      if (data.status === "active" && !dailyJoined.current &&
+          (cur === "waiting" || cur === "greeting" || cur === "hold")) {
+        stopJingle(); stopAllSpeech(); setPhase("connecting");
       }
-
       if (data.status === "hold" && cur === "active") {
-        setPhase("hold");
-        startJingle();
+        setPhase("hold"); startJingle();
         speak("Please hold on, your agent will be back with you shortly.");
       }
-
       if (data.status === "active" && cur === "hold" && dailyJoined.current) {
-        stopJingle();
-        stopAllSpeech();
-        speechCancelled.current = false;
+        stopJingle(); stopAllSpeech(); speechCancelled.current = false;
         setPhase("active");
         setTimeout(() => speak("Your agent has returned. Thank you for holding."), 500);
       }
-
       if (data.status === "ended" && cur !== "ended" && cur !== "rating") {
-        stopJingle();
-        stopAllSpeech();
-        cleanupDaily();
-        setPhase("rating");
+        stopJingle(); stopAllSpeech(); cleanupDaily(); setPhase("rating");
       }
     });
   }, [callId]);
 
-  // ── STEP 4: Re-announce queue position ───────────────────────────────────
+  // ── STEP 5: Re-announce queue position ───────────────────────────────────
   useEffect(() => {
     if (phase !== "waiting" || !callData) return;
     const pos = callData.queuePosition;
@@ -465,7 +703,7 @@ await playStorageAudio("support-audio/swift9javoice.mp4", speechCancelled);
     }
   }, [callData?.queuePosition, phase]);
 
-  // ── STEP 5: Connect Daily ─────────────────────────────────────────────────
+  // ── STEP 6: Connect Daily ─────────────────────────────────────────────────
   useEffect(() => {
     if (phase !== "connecting" || !callData?.roomUrl || !callData?.customerToken) return;
 
@@ -480,10 +718,42 @@ await playStorageAudio("support-audio/swift9javoice.mp4", speechCancelled);
           if (existing) await existing.destroy();
         } catch { /**/ }
 
-        const call = DailyIframe.createCallObject({ audioSource: true, videoSource: false });
+        removeAllRemoteAudio();
+
+        const call = DailyIframe.createCallObject({
+          audioSource: activeMicId || true,
+          videoSource: false,
+          subscribeToTracksAutomatically: true,
+        });
         callObj.current = call;
 
+        // Attach remote audio tracks with selected speaker
+        call.on("track-started", (event) => {
+          if (!event?.participant || event.participant.local) return;
+          if (event.track?.kind !== "audio") return;
+          attachRemoteAudio(event.participant.session_id, event.track, activeSpeakerId);
+        });
+
+        call.on("track-stopped", (event) => {
+          if (!event?.participant || event.participant.local) return;
+          if (event.track?.kind !== "audio") return;
+          removeRemoteAudio(event.participant.session_id);
+        });
+
+        call.on("participant-left", (event) => {
+          if (event?.participant) removeRemoteAudio(event.participant.session_id);
+        });
+
         call.on("joined-meeting", () => {
+          // Catch tracks already in the room when we join
+          const participants = call.participants();
+          Object.values(participants).forEach((p: any) => {
+            if (p.local) return;
+            const audioTrack = p.tracks?.audio?.persistentTrack;
+            if (audioTrack && audioTrack.readyState === "live") {
+              attachRemoteAudio(p.session_id, audioTrack, activeSpeakerId);
+            }
+          });
           dailyJoined.current     = true;
           speechCancelled.current = false;
           setPhase("active");
@@ -493,24 +763,25 @@ await playStorageAudio("support-audio/swift9javoice.mp4", speechCancelled);
         });
 
         call.on("left-meeting", () => {
+          removeAllRemoteAudio();
           if (phaseRef.current !== "rating" && phaseRef.current !== "ended") {
             dailyJoined.current = false;
-            stopJingle();
-            stopAllSpeech();
-            setPhase("rating");
-            cleanupDaily();
+            stopJingle(); stopAllSpeech();
+            setPhase("rating"); cleanupDaily();
           }
         });
 
         call.on("error", () => {
+          removeAllRemoteAudio();
           setError("Connection error. Please try again.");
-          setPhase("error");
-          cleanupDaily();
+          setPhase("error"); cleanupDaily();
         });
 
         await call.join({
-          url: callData.roomUrl, token: callData.customerToken,
-          audioSource: true, videoSource: false,
+          url:         callData.roomUrl,
+          token:       callData.customerToken,
+          audioSource: activeMicId || true,
+          videoSource: false,
         });
       } catch {
         setError("Could not connect. Please check your microphone.");
@@ -521,24 +792,18 @@ await playStorageAudio("support-audio/swift9javoice.mp4", speechCancelled);
     initDaily();
   }, [phase]);
 
-  // ── Cleanup on unmount ────────────────────────────────────────────────────
+  // ── Cleanup ───────────────────────────────────────────────────────────────
   const cleanupDaily = useCallback(() => {
-    if (callObj.current) {
-      callObj.current.destroy().catch(() => {});
-      callObj.current = null;
-    }
+    if (callObj.current) { callObj.current.destroy().catch(() => {}); callObj.current = null; }
     dailyJoined.current = false;
+    removeAllRemoteAudio();
   }, []);
 
   useEffect(() => {
-    return () => {
-      stopJingle();
-      stopAllSpeech();
-      cleanupDaily();
-    };
+    return () => { stopJingle(); stopAllSpeech(); cleanupDaily(); };
   }, []);
 
-  // ── Actions ───────────────────────────────────────────────────────────────
+  // ── Call actions ──────────────────────────────────────────────────────────
   const toggleMute = useCallback(() => {
     if (!callObj.current) return;
     const next = !muted;
@@ -547,35 +812,109 @@ await playStorageAudio("support-audio/swift9javoice.mp4", speechCancelled);
   }, [muted]);
 
   const endCall = useCallback(async () => {
-    // Kill everything immediately — first thing, no delay
-    stopAllSpeech();
-    stopJingle();
-    cleanupDaily();
-
+    stopAllSpeech(); stopJingle(); cleanupDaily();
     if (callId) {
-      try {
-        const end = httpsCallable(functions, "endSupportCall");
-        await end({ callId });
-      } catch (e) { console.error(e); }
+      try { const end = httpsCallable(functions, "endSupportCall"); await end({ callId }); }
+      catch (e) { console.error(e); }
     }
-
-    if (phase === "active" || phase === "hold") {
-      setPhase("rating");
-    } else {
-      setPhase("ended");
-    }
+    if (phase === "active" || phase === "hold") setPhase("rating");
+    else setPhase("ended");
   }, [callId, phase, cleanupDaily, stopJingle, stopAllSpeech]);
+
+  // ── Short label helper for the device pill ────────────────────────────────
+  // Strips things like " (Built-in)" and " - USB Audio" for a tidy display
+  const shortLabel = (label?: string) => {
+    if (!label) return null;
+    return label.replace(/\s*[\(\-–].*/i, "").trim().slice(0, 22);
+  };
+
+  const activeMicLabel     = mics.find(m => m.deviceId === activeMicId)?.label;
+  const activeSpeakerLabel = speakers.find(s => s.deviceId === activeSpeakerId)?.label;
+  const showDeviceButton   = phase === "active" || phase === "hold";
 
   // ── Rating screen ─────────────────────────────────────────────────────────
   if (phase === "rating") {
     return (
       <StarRating
         agentName={callData?.agentName ?? "our agent"}
-        callId={callId ?? ""}
-        onDone={onClose}
-        dark={dark}
-        c={c}
+        callId={callId ?? ""} onDone={onClose} dark={dark} c={c}
       />
+    );
+  }
+
+  // ── Tap-to-start screen ───────────────────────────────────────────────────
+  if (phase === "tap_to_start") {
+    return (
+      <>
+        <style>{`
+          @keyframes ic-in { from{opacity:0;transform:translateY(24px)} to{opacity:1;transform:translateY(0)} }
+          @keyframes tap-pulse {
+            0%,100% { transform:scale(1); box-shadow:0 0 0 0 rgba(255,107,0,0.4); }
+            50%      { transform:scale(1.04); box-shadow:0 0 0 16px rgba(255,107,0,0); }
+          }
+        `}</style>
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 9999, background: c.bg,
+          display: "flex", flexDirection: "column",
+          alignItems: "center", justifyContent: "center",
+          animation: "ic-in .35s ease", padding: 24,
+        }}>
+          <div style={{
+            position: "absolute", top: 0, left: 0, right: 0, padding: "20px 24px",
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+            borderBottom: `1px solid ${c.brd}`, background: c.surf,
+          }}>
+            <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 20, fontWeight: 900, color: c.txt }}>
+              swift<span style={{ color: ACCENT }}>9ja</span>
+            </div>
+            <div style={{ fontSize: 11, fontWeight: 800, color: ACCENT, textTransform: "uppercase", letterSpacing: 1 }}>
+              Customer Support
+            </div>
+          </div>
+
+          <div style={{
+            background: c.surf, border: `1.5px solid ${c.brd}`,
+            borderRadius: 28, padding: "48px 40px",
+            width: "100%", maxWidth: 420, textAlign: "center",
+            boxShadow: "0 8px 40px rgba(0,0,0,0.12)",
+          }}>
+            <div style={{
+              width: 96, height: 96, borderRadius: "50%",
+              background: "rgba(255,107,0,0.08)", border: "2px solid rgba(255,107,0,0.2)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              margin: "0 auto 24px",
+            }}>
+              <RiHeadphoneLine size={42} color={ACCENT} />
+            </div>
+            <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 22, fontWeight: 900, color: c.txt, marginBottom: 10 }}>
+              Ready to connect
+            </div>
+            <div style={{ fontSize: 14, color: c.sub, marginBottom: 36, lineHeight: 1.6 }}>
+              Your call is set up. Tap below to start and hear the welcome message.
+            </div>
+            <button onClick={handleTapToStart} style={{
+              width: "100%", padding: "16px", borderRadius: 16, border: "none",
+              background: `linear-gradient(135deg,${ACCENT},#FF8C00)`,
+              color: "white", fontWeight: 900, cursor: "pointer",
+              fontSize: 16, fontFamily: "'Syne',sans-serif",
+              boxShadow: "0 6px 24px rgba(255,107,0,0.4)",
+              animation: "tap-pulse 2s ease infinite", letterSpacing: 0.3,
+            }}>
+              📞 Tap to Start Call
+            </button>
+            <button onClick={onClose} style={{
+              marginTop: 14, width: "100%", padding: "11px",
+              borderRadius: 12, background: "transparent", border: `1px solid ${c.brd}`,
+              color: c.sub, fontSize: 12, fontWeight: 700, cursor: "pointer",
+              fontFamily: "'DM Sans',sans-serif",
+            }}>Cancel</button>
+          </div>
+
+          <div style={{ marginTop: 24, fontSize: 12, color: c.sub, fontWeight: 600 }}>
+            Audio only · Secured by Daily.co WebRTC
+          </div>
+        </div>
+      </>
     );
   }
 
@@ -583,39 +922,37 @@ await playStorageAudio("support-audio/swift9javoice.mp4", speechCancelled);
   const PhaseIcon = () => {
     if (phase === "init" || phase === "connecting")
       return <RiLoader4Line size={48} color={ACCENT} style={{ animation: "spin 1s linear infinite" }} />;
-    if (phase === "greeting" || phase === "waiting")
-      return <RiTimeLine size={48} color={ACCENT} />;
-    if (phase === "active")
-      return <RiHeadphoneLine size={48} color={ACCENT} />;
-    if (phase === "hold")
-      return <RiTimeLine size={48} color="#F59E0B" />;
-    if (phase === "ended")
-      return <RiPhoneFill size={48} color="#10B981" />;
+    if (phase === "greeting" || phase === "waiting") return <RiTimeLine size={48} color={ACCENT} />;
+    if (phase === "active")  return <RiHeadphoneLine size={48} color={ACCENT} />;
+    if (phase === "hold")    return <RiTimeLine size={48} color="#F59E0B" />;
+    if (phase === "ended")   return <RiPhoneFill size={48} color="#10B981" />;
     return <RiUserLine size={48} color={c.sub} />;
   };
 
   const phaseTitle: Record<CallPhase, string> = {
-    init:       "Setting up your call…",
-    greeting:   "Welcome to Swift9ja Support",
-    waiting:    "You are in the queue",
-    connecting: "Connecting to agent…",
-    active:     `Connected to ${callData?.agentName ?? "Support"}`,
-    hold:       "You are on hold",
-    ended:      "Call ended",
-    rating:     "",
-    error:      "Something went wrong",
+    init:         "Setting up your call…",
+    tap_to_start: "",
+    greeting:     "Welcome to Swift9ja Support",
+    waiting:      "You are in the queue",
+    connecting:   "Connecting to agent…",
+    active:       `Connected to ${callData?.agentName ?? "Support"}`,
+    hold:         "You are on hold",
+    ended:        "Call ended",
+    rating:       "",
+    error:        "Something went wrong",
   };
 
   const phaseSubtitle: Record<CallPhase, string> = {
-    init:       "Please wait…",
-    greeting:   "Please listen to the following information…",
-    waiting:    callData ? `Position ${callData.queuePosition} in queue` : "Finding the next available agent…",
-    connecting: "Please wait a moment…",
-    active:     callTimer,
-    hold:       "Your agent will be back shortly…",
-    ended:      "Thank you for contacting Swift9ja support.",
-    rating:     "",
-    error:      error,
+    init:         "Please wait…",
+    tap_to_start: "",
+    greeting:     "Please listen to the following information…",
+    waiting:      callData ? `Position ${callData.queuePosition} in queue` : "Finding the next available agent…",
+    connecting:   "Please wait a moment…",
+    active:       callTimer,
+    hold:         "Your agent will be back shortly…",
+    ended:        "Thank you for contacting Swift9ja support.",
+    rating:       "",
+    error:        error,
   };
 
   const ringColor = phase === "active" ? ACCENT : phase === "hold" ? "#F59E0B" : null;
@@ -626,11 +963,11 @@ await playStorageAudio("support-audio/swift9javoice.mp4", speechCancelled);
         @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes pulse-ring {
           0%   { transform: scale(1);   opacity: 0.6; }
-          100% { transform: scale(1.6); opacity: 0;   }
+          100% { transform: scale(1.6); opacity: 0; }
         }
         @keyframes ic-in {
           from { opacity: 0; transform: translateY(24px); }
-          to   { opacity: 1; transform: translateY(0);    }
+          to   { opacity: 1; transform: translateY(0); }
         }
         @keyframes hold-blink {
           0%,100% { opacity: 1; }
@@ -638,17 +975,30 @@ await playStorageAudio("support-audio/swift9javoice.mp4", speechCancelled);
         }
       `}</style>
 
+      {/* ── Audio device sheet (rendered above everything) ── */}
+      {showDeviceSheet && (
+        <AudioDeviceSheet
+          mics={mics}
+          speakers={speakers}
+          activeMicId={activeMicId}
+          activeSpeakerId={activeSpeakerId}
+          onMicChange={handleMicChange}
+          onSpeakerChange={handleSpeakerChange}
+          onClose={() => setShowDeviceSheet(false)}
+          c={c} dark={dark}
+          supportsSpeakerSelection={supportsSpeakerSelect}
+        />
+      )}
+
       <div style={{
-        position: "fixed", inset: 0, zIndex: 9999,
-        background: c.bg,
+        position: "fixed", inset: 0, zIndex: 9999, background: c.bg,
         display: "flex", flexDirection: "column",
         alignItems: "center", justifyContent: "center",
         animation: "ic-in .35s ease",
       }}>
         {/* Header */}
         <div style={{
-          position: "absolute", top: 0, left: 0, right: 0,
-          padding: "20px 24px",
+          position: "absolute", top: 0, left: 0, right: 0, padding: "20px 24px",
           display: "flex", alignItems: "center", justifyContent: "space-between",
           borderBottom: `1px solid ${c.brd}`, background: c.surf,
         }}>
@@ -668,6 +1018,7 @@ await playStorageAudio("support-audio/swift9javoice.mp4", speechCancelled);
           width: "100%", maxWidth: 420, textAlign: "center",
           boxShadow: "0 8px 40px rgba(0,0,0,0.12)",
         }}>
+          {/* Icon */}
           <div style={{ position: "relative", display: "inline-flex", marginBottom: 24 }}>
             {ringColor && (
               <div style={{
@@ -681,14 +1032,11 @@ await playStorageAudio("support-audio/swift9javoice.mp4", speechCancelled);
               background:
                 phase === "active" ? "rgba(255,107,0,0.12)" :
                 phase === "hold"   ? "rgba(245,158,11,0.12)" :
-                phase === "ended"  ? "rgba(16,185,129,0.12)" :
-                "rgba(255,107,0,0.08)",
+                phase === "ended"  ? "rgba(16,185,129,0.12)" : "rgba(255,107,0,0.08)",
               border: `2px solid ${
                 phase === "active" ? "rgba(255,107,0,0.2)" :
                 phase === "hold"   ? "rgba(245,158,11,0.3)" :
-                phase === "ended"  ? "rgba(16,185,129,0.3)" :
-                "rgba(255,107,0,0.2)"
-              }`,
+                phase === "ended"  ? "rgba(16,185,129,0.3)" : "rgba(255,107,0,0.2)"}`,
               display: "flex", alignItems: "center", justifyContent: "center",
             }}>
               <PhaseIcon />
@@ -705,19 +1053,64 @@ await playStorageAudio("support-audio/swift9javoice.mp4", speechCancelled);
           <div style={{
             fontSize: 14, fontWeight: 600,
             color: phase === "active" ? ACCENT : phase === "hold" ? "#F59E0B" : c.sub,
-            marginBottom: 32, lineHeight: 1.6,
+            marginBottom: showDeviceButton ? 16 : 32, lineHeight: 1.6,
             animation: phase === "hold" ? "hold-blink 2s ease infinite" : "none",
           }}>
             {phaseSubtitle[phase]}
           </div>
+
+          {/* ── Audio device selector pill ───────────────────────────────── */}
+          {showDeviceButton && (
+            <div style={{ marginBottom: 20 }}>
+              <button
+                onClick={() => setShowDeviceSheet(true)}
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: 6,
+                  padding: "7px 13px 7px 10px",
+                  borderRadius: 50,
+                  border: `1.5px solid ${c.brd}`,
+                  background: "transparent",
+                  cursor: "pointer",
+                  color: c.sub,
+                  fontSize: 12, fontWeight: 600,
+                  fontFamily: "'DM Sans',sans-serif",
+                  maxWidth: "100%",
+                  transition: "border-color .15s",
+                }}
+              >
+                <RiSettings3Line size={13} color={c.sub} />
+                {/* Mic label */}
+                <RiMicLine size={12} color={c.sub} />
+                <span style={{
+                  maxWidth: 90, overflow: "hidden",
+                  textOverflow: "ellipsis", whiteSpace: "nowrap",
+                }}>
+                  {shortLabel(activeMicLabel) ?? "Default mic"}
+                </span>
+                {/* Speaker label — only if setSinkId is supported */}
+                {supportsSpeakerSelect && (
+                  <>
+                    <span style={{ color: c.dim, margin: "0 1px" }}>·</span>
+                    <RiVolumeUpLine size={12} color={c.sub} />
+                    <span style={{
+                      maxWidth: 80, overflow: "hidden",
+                      textOverflow: "ellipsis", whiteSpace: "nowrap",
+                    }}>
+                      {shortLabel(activeSpeakerLabel) ?? "Default"}
+                    </span>
+                  </>
+                )}
+                <RiArrowDownSLine size={13} color={c.dim} />
+              </button>
+            </div>
+          )}
 
           {/* Queue badge */}
           {phase === "waiting" && callData && (
             <div style={{
               display: "flex", alignItems: "center", justifyContent: "center",
               gap: 10, marginBottom: 28,
-              background: "rgba(255,107,0,0.06)",
-              border: "1.5px solid rgba(255,107,0,0.15)",
+              background: "rgba(255,107,0,0.06)", border: "1.5px solid rgba(255,107,0,0.15)",
               borderRadius: 14, padding: "14px 20px",
             }}>
               <RiTimeLine size={18} color={ACCENT} />
@@ -732,8 +1125,7 @@ await playStorageAudio("support-audio/swift9javoice.mp4", speechCancelled);
             <div style={{
               display: "flex", alignItems: "center", justifyContent: "center",
               gap: 10, marginBottom: 28,
-              background: "rgba(245,158,11,0.06)",
-              border: "1.5px solid rgba(245,158,11,0.2)",
+              background: "rgba(245,158,11,0.06)", border: "1.5px solid rgba(245,158,11,0.2)",
               borderRadius: 14, padding: "14px 20px",
             }}>
               <RiTimeLine size={18} color="#F59E0B" />

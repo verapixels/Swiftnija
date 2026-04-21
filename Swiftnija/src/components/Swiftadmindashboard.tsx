@@ -837,6 +837,7 @@ function UsersPage({ adminUser, showToast, openPermRequest, C }: { adminUser: Ad
   const [confirm, setConfirm] = useState<{ uid: string; name: string; action: string } | null>(null);
   const [orderCounts, setOrderCounts] = useState<Record<string, number>>({});
   const inp = mkInp(C);
+  const navigate = useNavigate();
 
   useEffect(() => {
     const unsub = onSnapshot(query(collection(db, "orders")), snap => {
@@ -935,7 +936,7 @@ function UsersPage({ adminUser, showToast, openPermRequest, C }: { adminUser: Ad
             </tr></thead>
             <tbody>
               {filtered.map(u => (
-                <tr key={u.id} style={{ borderBottom: `1px solid ${C.border}`, cursor: "pointer", transition: "background 0.15s" }} onMouseEnter={e => (e.currentTarget.style.background = C.surfaceHover)} onMouseLeave={e => (e.currentTarget.style.background = "transparent")} onClick={() => setSelected(u)}>
+                <tr key={u.id} style={{ borderBottom: `1px solid ${C.border}`, cursor: "pointer", transition: "background 0.15s" }} onMouseEnter={e => (e.currentTarget.style.background = C.surfaceHover)} onMouseLeave={e => (e.currentTarget.style.background = "transparent")} onClick={() => navigate(`/admin/user/${u.id}`)}>
                   <td style={{ padding: "12px 16px" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                       <Avatar src={u.photoURL} name={u.fullName || u.displayName} size={32} C={C} />
@@ -1047,6 +1048,7 @@ function VendorsPage({ adminUser, showToast, openPermRequest, C }: { adminUser: 
   const [confirm, setConfirm] = useState<{ uid: string; name: string; action: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const inp = mkInp(C);
+  const navigate = useNavigate();
 
   useEffect(() => {
     return onSnapshot(query(collection(db, "vendors"), orderBy("createdAt", "desc")), snap => {
@@ -1125,7 +1127,7 @@ function VendorsPage({ adminUser, showToast, openPermRequest, C }: { adminUser: 
       {loading ? <div style={{ color: C.muted, textAlign: "center", padding: 40 }}>Loading…</div> : filtered.length === 0 ? <Empty text="No vendors" icon={<RiStoreLine />} C={C} /> : (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 14 }}>
           {filtered.map(v => (
-            <div key={v.id} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 18, overflow: "hidden", cursor: "pointer", boxShadow: `0 2px 12px ${C.shadow}`, transition: "transform 0.15s, box-shadow 0.15s" }} onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.transform = "translateY(-2px)"; (e.currentTarget as HTMLDivElement).style.boxShadow = `0 8px 24px ${C.shadow}`; }} onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.transform = "translateY(0)"; (e.currentTarget as HTMLDivElement).style.boxShadow = `0 2px 12px ${C.shadow}`; }} onClick={() => setSelected(v)}>
+            <div key={v.id} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 18, overflow: "hidden", cursor: "pointer", boxShadow: `0 2px 12px ${C.shadow}`, transition: "transform 0.15s, box-shadow 0.15s" }} onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.transform = "translateY(-2px)"; (e.currentTarget as HTMLDivElement).style.boxShadow = `0 8px 24px ${C.shadow}`; }} onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.transform = "translateY(0)"; (e.currentTarget as HTMLDivElement).style.boxShadow = `0 2px 12px ${C.shadow}`; }} onClick={() => navigate(`/admin/vendor/${v.id}`)}>
               <div style={{ height: 80, background: v.coverPhoto ? `url(${v.coverPhoto}) center/cover` : `linear-gradient(135deg, ${C.orange}18, ${C.blue}0d)`, borderBottom: `1px solid ${C.border}` }} />
               <div style={{ padding: 16 }}>
                 <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 10 }}>
@@ -1229,6 +1231,7 @@ function RidersPage({ adminUser, showToast, openPermRequest, C }: { adminUser: A
   // Live delivery counts from orders collection
   const [riderDeliveryCounts, setRiderDeliveryCounts] = useState<Record<string, number>>({});
   const inp = mkInp(C);
+  const navigate = useNavigate();
 
   useEffect(() => {
     // Count delivered orders per rider from the orders collection
@@ -1316,7 +1319,7 @@ function RidersPage({ adminUser, showToast, openPermRequest, C }: { adminUser: A
               ))}
             </tr></thead>
             <tbody>{filtered.map(r => (
-              <tr key={r.id} style={{ borderBottom: `1px solid ${C.border}`, cursor: "pointer", transition: "background 0.15s" }} onMouseEnter={e => (e.currentTarget.style.background = C.surfaceHover)} onMouseLeave={e => (e.currentTarget.style.background = "transparent")} onClick={() => setSelected(r)}>
+              <tr key={r.id} style={{ borderBottom: `1px solid ${C.border}`, cursor: "pointer", transition: "background 0.15s" }} onMouseEnter={e => (e.currentTarget.style.background = C.surfaceHover)} onMouseLeave={e => (e.currentTarget.style.background = "transparent")} onClick={() => navigate(`/admin/rider/${r.id}`)}>
                 <td style={{ padding: "12px 16px" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <Avatar src={r.photoURL} name={r.fullName} size={32} C={C} />
