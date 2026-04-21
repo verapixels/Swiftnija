@@ -31,28 +31,36 @@ interface CallData {
   customerToken?: string;
 }
 
-// ── TTS-only phonetic replacement ────────────────────────────────────────────
-// The brand name "swift9ja" is kept in all UI text exactly as-is.
-// Only the string fed to the speech engine gets swapped for a phonetic
-// spelling that mobile TTS engines (Chrome Android, Safari iOS) can say
-// correctly. "Nahja" is the spelling that reads closest to the Nigerian
-// "Naija" (NAH-ja) on both Google TTS and Apple TTS without sounding like
-// "Nay-ja" or "Nigh-ja" which "Naija" produces on most mobile engines.
-function toSpeakableText(text: string): string {
-  return text
-    .replace(/swift\s*9ja/gi,  "Swift Nahja")
-    .replace(/swift9ja/gi,     "Swift Nahja")
-    .replace(/swift\s*nija/gi, "Swift Nahja")
-    .replace(/swiftnija/gi,    "Swift Nahja")
-    .replace(/swift\s*naija/gi,"Swift Nahja")
-    .replace(/swiftnaija/gi,   "Swift Nahja");
+// ── Play a Firebase Storage audio file ───────────────────────────────────────
+// Returns the Audio element so caller can stop it if needed
+async function playStorageAudio(
+  path: string,
+  cancelledRef: React.MutableRefObject<boolean>
+): Promise<void> {
+  return new Promise(async resolve => {
+    if (cancelledRef.current) { resolve(); return; }
+
+    // 5 second safety timeout
+    const timeout = setTimeout(() => resolve(), 5000);
+    const done = () => { clearTimeout(timeout); resolve(); };
+
+    try {
+      const storageRef = ref(storage, path);
+      const url        = await getDownloadURL(storageRef);
+      if (cancelledRef.current) { done(); return; }
+
+      const audio = new Audio(url);
+      audio.onended  = done;
+      audio.onerror  = done;
+      await audio.play();
+    } catch {
+      done();
+    }
+  });
 }
 
-// ── speak() — guaranteed to resolve, never hangs ─────────────────────────────
+// ── speak() — TTS for sentences, guaranteed to resolve ───────────────────────
 function speak(text: string, rate = 0.88, pitch = 1.05): Promise<void> {
-  // Convert BEFORE passing to the speech engine
-  const cleanText = toSpeakableText(text);
-
   return new Promise(resolve => {
     const hardTimeout = setTimeout(() => resolve(), 5000);
     const done = () => { clearTimeout(hardTimeout); resolve(); };
@@ -61,7 +69,7 @@ function speak(text: string, rate = 0.88, pitch = 1.05): Promise<void> {
     try { window.speechSynthesis.cancel(); } catch { /**/ }
 
     const trySpeak = () => {
-      const utt   = new SpeechSynthesisUtterance(cleanText);
+      const utt   = new SpeechSynthesisUtterance(text);
       utt.rate    = rate;
       utt.pitch   = pitch;
       utt.volume  = 1;
@@ -97,14 +105,9 @@ function speak(text: string, rate = 0.88, pitch = 1.05): Promise<void> {
   });
 }
 
-// ── speakAll() — cancelled immediately when cancelledRef is set ──────────────
-async function speakAll(lines: string[], cancelledRef: React.MutableRefObject<boolean>): Promise<void> {
-  for (const line of lines) {
-    if (cancelledRef.current) return;
-    await speak(line);
-    if (cancelledRef.current) return;
-    await new Promise(r => setTimeout(r, 350));
-  }
+// ── gap between sentences ─────────────────────────────────────────────────────
+function gap(ms = 350): Promise<void> {
+  return new Promise(r => setTimeout(r, ms));
 }
 
 // ── Jingle ────────────────────────────────────────────────────────────────────
@@ -159,7 +162,7 @@ function StarRating({
     try {
       const rate = httpsCallable(functions, "rateSupportCall");
       await rate({ callId, rating: star });
-    } catch { /* silent fail */ }
+    } catch { /**/ }
     setSubmitted(true);
     setSubmitting(false);
     setTimeout(onDone, 1600);
@@ -188,27 +191,21 @@ function StarRating({
         }}>
           <RiHeadphoneLine size={34} color={ACCENT} />
         </div>
-
         {submitted ? (
           <>
             <div style={{ fontSize: 44, marginBottom: 12 }}>🎉</div>
-            <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 20, fontWeight: 900, color: c.txt, marginBottom: 8 }}>
-              Thank you!
-            </div>
+            <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 20, fontWeight: 900, color: c.txt, marginBottom: 8 }}>Thank you!</div>
             <div style={{ fontSize: 13, color: c.sub }}>Your feedback helps us serve you better.</div>
           </>
         ) : (
           <>
-            <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 20, fontWeight: 900, color: c.txt, marginBottom: 8 }}>
-              Rate your experience
-            </div>
+            <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 20, fontWeight: 900, color: c.txt, marginBottom: 8 }}>Rate your experience</div>
             <div style={{ fontSize: 13, color: c.sub, marginBottom: 28 }}>
               How was your call with <strong style={{ color: c.txt }}>{agentName}</strong>?
             </div>
             <div style={{ display: "flex", justifyContent: "center", gap: 10, marginBottom: 14 }}>
               {[1, 2, 3, 4, 5].map(star => (
-                <button
-                  key={star}
+                <button key={star}
                   onMouseEnter={() => setHovered(star)}
                   onMouseLeave={() => setHovered(0)}
                   onClick={() => !submitting && submit(star)}
@@ -227,58 +224,17 @@ function StarRating({
             <div style={{ fontSize: 13, fontWeight: 700, color: ACCENT, minHeight: 20 }}>
               {labels[hovered || selected] || "Tap a star to rate"}
             </div>
-            <button
-              onClick={onDone}
-              style={{
-                marginTop: 20, width: "100%", padding: "11px",
-                borderRadius: 12, background: "transparent",
-                border: `1px solid ${c.brd}`,
-                color: c.sub, fontSize: 12, fontWeight: 700, cursor: "pointer",
-                fontFamily: "'DM Sans',sans-serif",
-              }}
-            >
-              Skip
-            </button>
+            <button onClick={onDone} style={{
+              marginTop: 20, width: "100%", padding: "11px",
+              borderRadius: 12, background: "transparent", border: `1px solid ${c.brd}`,
+              color: c.sub, fontSize: 12, fontWeight: 700, cursor: "pointer",
+              fontFamily: "'DM Sans',sans-serif",
+            }}>Skip</button>
           </>
         )}
       </div>
     </div>
   );
-}
-
-// ── FIX 2: Track audio elements so we can clean them up ──────────────────────
-// Daily.co does NOT auto-play remote audio tracks on mobile. You must
-// listen for track-started events and manually create/play Audio elements
-// (or attach to existing ones). We keep a map of participantId -> <audio>
-// so we can clean up properly on leave.
-const remoteAudioElements = new Map<string, HTMLAudioElement>();
-
-function attachRemoteAudio(participantId: string, track: MediaStreamTrack) {
-  // Reuse existing element for this participant if it exists
-  let audioEl = remoteAudioElements.get(participantId);
-  if (!audioEl) {
-    audioEl = document.createElement("audio");
-    audioEl.autoplay = true;
-    audioEl.setAttribute("playsinline", "true"); // required on iOS
-    document.body.appendChild(audioEl);
-    remoteAudioElements.set(participantId, audioEl);
-  }
-  const stream = new MediaStream([track]);
-  audioEl.srcObject = stream;
-  audioEl.play().catch(err => console.warn("[Audio] play failed:", err));
-}
-
-function removeRemoteAudio(participantId: string) {
-  const audioEl = remoteAudioElements.get(participantId);
-  if (audioEl) {
-    audioEl.srcObject = null;
-    audioEl.remove();
-    remoteAudioElements.delete(participantId);
-  }
-}
-
-function removeAllRemoteAudio() {
-  remoteAudioElements.forEach((el, id) => removeRemoteAudio(id));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -304,30 +260,29 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
   const [lastQueuePos,    setLastQueuePos]    = useState<number | null>(null);
   const [greetingStarted, setGreetingStarted] = useState(false);
 
-  const callObj     = useRef<DailyCall | null>(null);
-  const jingleRef   = useRef<HTMLAudioElement | null>(null);
-  const dailyJoined = useRef(false);
-  const phaseRef    = useRef<CallPhase>("init");
-  const callTimer   = useCallTimer(phase === "active");
-
-  const speechCancelled = useRef(false);
+  const callObj         = useRef<DailyCall | null>(null);
+  const jingleRef       = useRef<HTMLAudioElement | null>(null);
+  const greetAudioRef   = useRef<HTMLAudioElement | null>(null); // track greeting audio
+  const dailyJoined     = useRef(false);
+  const phaseRef        = useRef<CallPhase>("init");
+  const speechCancelled = useRef(false); // ← instant kill switch for all audio
+  const callTimer       = useCallTimer(phase === "active");
 
   useEffect(() => { phaseRef.current = phase; }, [phase]);
 
+  // ── stopAllSpeech — kills TTS AND any playing greeting audio ─────────────
   const stopAllSpeech = useCallback(() => {
     speechCancelled.current = true;
     try { window.speechSynthesis?.cancel(); } catch { /**/ }
+    // Also stop any greeting audio clip that's playing
+    if (greetAudioRef.current) {
+      greetAudioRef.current.pause();
+      greetAudioRef.current.src = "";
+      greetAudioRef.current = null;
+    }
   }, []);
 
-  const buildQueueSpeech = (pos: number) => {
-    const mins = Math.max(1, pos);
-    return (
-      `You are number ${pos} in the queue. ` +
-      `Your estimated wait time is approximately ${mins} ${mins === 1 ? "minute" : "minutes"}. ` +
-      `Please stay on the line and we will connect you to an agent shortly.`
-    );
-  };
-
+  // ── Jingle controls ───────────────────────────────────────────────────────
   const startJingle = useCallback(async () => {
     if (jingleRef.current) return;
     const audio = await createJingle();
@@ -346,13 +301,23 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
   const pauseJingle  = useCallback(() => { jingleRef.current?.pause(); }, []);
   const resumeJingle = useCallback(() => { jingleRef.current?.play().catch(() => {}); }, []);
 
+  // ── Queue speech ──────────────────────────────────────────────────────────
+  const buildQueueSpeech = (pos: number) => {
+    const mins = Math.max(1, pos);
+    return (
+      `You are number ${pos} in the queue. ` +
+      `Your estimated wait time is approximately ${mins} ${mins === 1 ? "minute" : "minutes"}. ` +
+      `Please stay on the line and we will connect you to an agent shortly.`
+    );
+  };
+
   const announceQueue = useCallback(async (pos: number) => {
     pauseJingle();
     await speak(buildQueueSpeech(pos));
     resumeJingle();
   }, [pauseJingle, resumeJingle]);
 
-  // ── STEP 1: Create room ─────────────────────────────────────────────────────
+  // ── STEP 1: Create room ───────────────────────────────────────────────────
   useEffect(() => {
     if (!auth.currentUser) {
       setError("You must be signed in to start a call.");
@@ -375,19 +340,22 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
       });
   }, []);
 
-  // ── STEP 2: Voice greeting ──────────────────────────────────────────────────
+  // ── STEP 2: Voice greeting ────────────────────────────────────────────────
+  // NEW: plays your real swift9javoice.mp4 recording for the brand name.
+  // All other sentences use TTS. Each step checks speechCancelled before running.
   useEffect(() => {
     if (phase !== "greeting" || greetingStarted) return;
     setGreetingStarted(true);
     speechCancelled.current = false;
 
     const runGreeting = async () => {
+      // Hard overall cap — always move to waiting within 30 seconds
       const overallCap = setTimeout(() => {
         if (!speechCancelled.current) {
           setPhase("waiting");
           startJingle();
         }
-      }, 25000);
+      }, 30000);
 
       try {
         const h   = new Date().getHours();
@@ -399,21 +367,39 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
         const pos  = callData?.queuePosition ?? 1;
         const mins = Math.max(1, pos);
 
-        // toSpeakableText() inside speak() converts "swift9ja" to the
-        // correct phonetic form before the engine ever sees it
-        await speakAll([
-          `${tod}! Welcome to swift9ja Customer Support.`,
-          "Please note that this call is being recorded for quality assurance and training purposes.",
-          `You are number ${pos} in the queue.`,
-          `Your estimated wait time is approximately ${mins} ${mins === 1 ? "minute" : "minutes"}.`,
-          "Please stay on the line and we will connect you to an agent shortly.",
-        ], speechCancelled);
+         // 1. Time of day greeting + "welcome to" using TTS
+         if (speechCancelled.current) throw new Error("cancelled");
+await speak(`${tod}! Welcome to`);
+await gap(150);
 
-        if (!speechCancelled.current) {
-          setLastQueuePos(pos);
-        }
-      } catch (e) {
-        console.error("[Greeting]", e);
+// 2. Play YOUR real recording for "Swift9ja Customer Support"
+if (speechCancelled.current) throw new Error("cancelled");
+await playStorageAudio("support-audio/swift9javoice.mp4", speechCancelled);
+        await gap();
+
+        // 3. Recording notice using TTS
+        if (speechCancelled.current) throw new Error("cancelled");
+        await speak("Please note that this call is being recorded for quality assurance and training purposes.");
+        await gap();
+
+        // 4. Queue position using TTS
+        if (speechCancelled.current) throw new Error("cancelled");
+        await speak(`You are number ${pos} in the queue.`);
+        await gap();
+
+        // 5. Wait time using TTS
+        if (speechCancelled.current) throw new Error("cancelled");
+        await speak(`Your estimated wait time is approximately ${mins} ${mins === 1 ? "minute" : "minutes"}.`);
+        await gap();
+
+        // 6. Hold message using TTS
+        if (speechCancelled.current) throw new Error("cancelled");
+        await speak("Please stay on the line and we will connect you to an agent shortly.");
+
+        if (!speechCancelled.current) setLastQueuePos(pos);
+
+      } catch {
+        // Either cancelled or error — move on
       } finally {
         clearTimeout(overallCap);
         if (!speechCancelled.current) {
@@ -426,7 +412,7 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
     runGreeting();
   }, [phase, greetingStarted]);
 
-  // ── STEP 3: Firestore listener ──────────────────────────────────────────────
+  // ── STEP 3: Firestore listener ────────────────────────────────────────────
   useEffect(() => {
     if (!callId) return;
 
@@ -455,8 +441,8 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
       if (data.status === "active" && cur === "hold" && dailyJoined.current) {
         stopJingle();
         stopAllSpeech();
-        setPhase("active");
         speechCancelled.current = false;
+        setPhase("active");
         setTimeout(() => speak("Your agent has returned. Thank you for holding."), 500);
       }
 
@@ -469,7 +455,7 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
     });
   }, [callId]);
 
-  // ── STEP 4: Re-announce queue position ─────────────────────────────────────
+  // ── STEP 4: Re-announce queue position ───────────────────────────────────
   useEffect(() => {
     if (phase !== "waiting" || !callData) return;
     const pos = callData.queuePosition;
@@ -479,7 +465,7 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
     }
   }, [callData?.queuePosition, phase]);
 
-  // ── STEP 5: Connect Daily ───────────────────────────────────────────────────
+  // ── STEP 5: Connect Daily ─────────────────────────────────────────────────
   useEffect(() => {
     if (phase !== "connecting" || !callData?.roomUrl || !callData?.customerToken) return;
 
@@ -494,57 +480,15 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
           if (existing) await existing.destroy();
         } catch { /**/ }
 
-        const call = DailyIframe.createCallObject({
-          audioSource: true,
-          videoSource: false,
-          // FIX 2a: Tell Daily to subscribe to all remote tracks automatically.
-          // Without this, on mobile the remote audio track is received but
-          // never played — you're connected but hear nothing.
-          subscribeToTracksAutomatically: true,
-        });
+        const call = DailyIframe.createCallObject({ audioSource: true, videoSource: false });
         callObj.current = call;
 
-        // FIX 2b: Listen for remote participant audio tracks and play them.
-        // Daily fires track-started when a remote track becomes available.
-        // We create an <audio> element and attach the track's MediaStream to it.
-        call.on("track-started", (event) => {
-          if (!event?.participant || event.participant.local) return;
-          if (event.track?.kind !== "audio") return;
-          console.log("[Daily] Remote audio track started:", event.participant.session_id);
-          attachRemoteAudio(event.participant.session_id, event.track);
-        });
-
-        // FIX 2c: Clean up audio elements when a participant leaves or track stops
-        call.on("track-stopped", (event) => {
-          if (!event?.participant || event.participant.local) return;
-          if (event.track?.kind !== "audio") return;
-          removeRemoteAudio(event.participant.session_id);
-        });
-
-        call.on("participant-left", (event) => {
-          if (event?.participant) {
-            removeRemoteAudio(event.participant.session_id);
-          }
-        });
-
         call.on("joined-meeting", () => {
-          dailyJoined.current = true;
+          dailyJoined.current     = true;
           speechCancelled.current = false;
           setPhase("active");
-
-          // FIX 2d: Also attach any tracks that were already present when we joined
-          // (race condition: track-started may fire before joined-meeting for some participants)
-          const participants = call.participants();
-          Object.values(participants).forEach((p) => {
-            if (p.local) return;
-            const audioTrack = p.tracks?.audio?.persistentTrack;
-            if (audioTrack && audioTrack.readyState === "live") {
-              attachRemoteAudio(p.session_id, audioTrack);
-            }
-          });
-
           setTimeout(() =>
-            speak("You are now connected to a swift9ja support agent. How can we help you today?"),
+            speak("You are now connected to a Swift Naija support agent. How can we help you today?"),
           800);
         });
 
@@ -553,7 +497,6 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
             dailyJoined.current = false;
             stopJingle();
             stopAllSpeech();
-            removeAllRemoteAudio();
             setPhase("rating");
             cleanupDaily();
           }
@@ -562,15 +505,12 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
         call.on("error", () => {
           setError("Connection error. Please try again.");
           setPhase("error");
-          removeAllRemoteAudio();
           cleanupDaily();
         });
 
         await call.join({
-          url:         callData.roomUrl,
-          token:       callData.customerToken,
-          audioSource: true,
-          videoSource: false,
+          url: callData.roomUrl, token: callData.customerToken,
+          audioSource: true, videoSource: false,
         });
       } catch {
         setError("Could not connect. Please check your microphone.");
@@ -581,7 +521,7 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
     initDaily();
   }, [phase]);
 
-  // ── Cleanup on unmount ──────────────────────────────────────────────────────
+  // ── Cleanup on unmount ────────────────────────────────────────────────────
   const cleanupDaily = useCallback(() => {
     if (callObj.current) {
       callObj.current.destroy().catch(() => {});
@@ -595,11 +535,10 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
       stopJingle();
       stopAllSpeech();
       cleanupDaily();
-      removeAllRemoteAudio();
     };
   }, []);
 
-  // ── Actions ─────────────────────────────────────────────────────────────────
+  // ── Actions ───────────────────────────────────────────────────────────────
   const toggleMute = useCallback(() => {
     if (!callObj.current) return;
     const next = !muted;
@@ -608,9 +547,9 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
   }, [muted]);
 
   const endCall = useCallback(async () => {
+    // Kill everything immediately — first thing, no delay
     stopAllSpeech();
     stopJingle();
-    removeAllRemoteAudio();
     cleanupDaily();
 
     if (callId) {
@@ -627,7 +566,7 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
     }
   }, [callId, phase, cleanupDaily, stopJingle, stopAllSpeech]);
 
-  // ── Rating screen ───────────────────────────────────────────────────────────
+  // ── Rating screen ─────────────────────────────────────────────────────────
   if (phase === "rating") {
     return (
       <StarRating
@@ -640,7 +579,7 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
     );
   }
 
-  // ── Phase helpers ───────────────────────────────────────────────────────────
+  // ── Phase helpers ─────────────────────────────────────────────────────────
   const PhaseIcon = () => {
     if (phase === "init" || phase === "connecting")
       return <RiLoader4Line size={48} color={ACCENT} style={{ animation: "spin 1s linear infinite" }} />;
@@ -657,7 +596,7 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
 
   const phaseTitle: Record<CallPhase, string> = {
     init:       "Setting up your call…",
-    greeting:   "Welcome to swift9ja Support",
+    greeting:   "Welcome to Swift9ja Support",
     waiting:    "You are in the queue",
     connecting: "Connecting to agent…",
     active:     `Connected to ${callData?.agentName ?? "Support"}`,
@@ -670,20 +609,16 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
   const phaseSubtitle: Record<CallPhase, string> = {
     init:       "Please wait…",
     greeting:   "Please listen to the following information…",
-    waiting:    callData
-      ? `Position ${callData.queuePosition} in queue`
-      : "Finding the next available agent…",
+    waiting:    callData ? `Position ${callData.queuePosition} in queue` : "Finding the next available agent…",
     connecting: "Please wait a moment…",
     active:     callTimer,
     hold:       "Your agent will be back shortly…",
-    ended:      "Thank you for contacting swift9ja support.",
+    ended:      "Thank you for contacting Swift9ja support.",
     rating:     "",
     error:      error,
   };
 
-  const ringColor =
-    phase === "active" ? ACCENT :
-    phase === "hold"   ? "#F59E0B" : null;
+  const ringColor = phase === "active" ? ACCENT : phase === "hold" ? "#F59E0B" : null;
 
   return (
     <>
@@ -733,7 +668,6 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
           width: "100%", maxWidth: 420, textAlign: "center",
           boxShadow: "0 8px 40px rgba(0,0,0,0.12)",
         }}>
-          {/* Icon with ring */}
           <div style={{ position: "relative", display: "inline-flex", marginBottom: 24 }}>
             {ringColor && (
               <div style={{
@@ -770,9 +704,7 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
 
           <div style={{
             fontSize: 14, fontWeight: 600,
-            color:
-              phase === "active" ? ACCENT :
-              phase === "hold"   ? "#F59E0B" : c.sub,
+            color: phase === "active" ? ACCENT : phase === "hold" ? "#F59E0B" : c.sub,
             marginBottom: 32, lineHeight: 1.6,
             animation: phase === "hold" ? "hold-blink 2s ease infinite" : "none",
           }}>
@@ -806,24 +738,19 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
             }}>
               <RiTimeLine size={18} color="#F59E0B" />
               <span style={{ fontSize: 14, fontWeight: 700, color: c.txt }}>
-                Hold music is playing
+                🎵 Hold music is playing…
               </span>
             </div>
           )}
 
           {/* Active controls */}
           {phase === "active" && (
-            <div style={{
-              display: "flex", gap: 16,
-              alignItems: "center", justifyContent: "center",
-              marginBottom: 8,
-            }}>
+            <div style={{ display: "flex", gap: 16, alignItems: "center", justifyContent: "center", marginBottom: 8 }}>
               <button onClick={toggleMute} style={{
                 width: 64, height: 64, borderRadius: "50%",
                 border: `2px solid ${muted ? "rgba(239,68,68,0.4)" : c.brd}`,
                 background: muted ? "rgba(239,68,68,0.1)" : c.surf,
-                color: muted ? "#EF4444" : c.sub,
-                cursor: "pointer",
+                color: muted ? "#EF4444" : c.sub, cursor: "pointer",
                 display: "flex", alignItems: "center", justifyContent: "center",
                 transition: "all .2s", fontSize: 0,
               }}>
@@ -841,7 +768,6 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
             </div>
           )}
 
-          {/* On hold */}
           {phase === "hold" && (
             <button onClick={endCall} style={{
               width: "100%", padding: "13px", borderRadius: 14, border: "none",
@@ -849,24 +775,18 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
               color: "white", fontWeight: 800, cursor: "pointer",
               fontSize: 13, fontFamily: "'DM Sans',sans-serif",
               boxShadow: "0 6px 20px rgba(239,68,68,0.3)",
-            }}>
-              End Call
-            </button>
+            }}>End Call</button>
           )}
 
-          {/* Waiting / greeting */}
           {(phase === "waiting" || phase === "greeting") && (
             <button onClick={endCall} style={{
               width: "100%", padding: "13px", borderRadius: 14,
               border: `1.5px solid ${c.brd}`, background: "transparent",
               color: c.sub, fontWeight: 700, cursor: "pointer",
               fontSize: 13, fontFamily: "'DM Sans',sans-serif",
-            }}>
-              Cancel
-            </button>
+            }}>Cancel</button>
           )}
 
-          {/* Ended / error */}
           {(phase === "ended" || phase === "error") && (
             <button onClick={onClose} style={{
               width: "100%", padding: "13px", borderRadius: 14, border: "none",

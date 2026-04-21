@@ -2904,10 +2904,10 @@ export const endSupportCall = onCall({
 // ─────────────────────────────────────────
 // FUNCTION 31: rateSupportCall
 // ─────────────────────────────────────────
-export const rateSupportCall = onCall({ cors: CORS_ORIGINS }, async (request) => {
+export const rateSupportCall = onCall({cors: CORS_ORIGINS}, async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "You must be signed in.");
 
-  const { callId, rating } = request.data as { callId: string; rating: number };
+  const {callId, rating} = request.data as { callId: string; rating: number };
   if (!callId) throw new HttpsError("invalid-argument", "callId is required.");
   if (!rating || rating < 1 || rating > 5) throw new HttpsError("invalid-argument", "Rating must be 1–5.");
 
@@ -2920,7 +2920,7 @@ export const rateSupportCall = onCall({ cors: CORS_ORIGINS }, async (request) =>
   });
 
   console.info(`[rateSupportCall] callId=${callId} rating=${rating}`);
-  return { success: true };
+  return {success: true};
 });
 
 export * from "./vendorPayouts";
