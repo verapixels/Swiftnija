@@ -100,16 +100,22 @@ async function playStorageAudio(
 // ── speak() ──────────────────────────────────────────────────────────────────
 function speak(text: string, rate = 0.88, pitch = 1.05): Promise<void> {
   return new Promise(resolve => {
-    const hardTimeout = setTimeout(() => resolve(), 6000);
+    const hardTimeout = setTimeout(() => resolve(), 8000);
     const done = () => { clearTimeout(hardTimeout); resolve(); };
+
     if (!window.speechSynthesis) { done(); return; }
     try { window.speechSynthesis.cancel(); } catch { /**/ }
 
-    const trySpeak = () => {
+    const doSpeak = (voices: SpeechSynthesisVoice[]) => {
       const utt = new SpeechSynthesisUtterance(text);
       utt.rate = rate; utt.pitch = pitch; utt.volume = 1;
-      utt.onend = done; utt.onerror = done;
-      const voices = window.speechSynthesis.getVoices();
+      utt.onend = done;
+      utt.onerror = (e) => {
+        // "interrupted" fires when cancel() clears the queue — not a real error
+        if ((e as any).error === "interrupted" || (e as any).error === "canceled") return;
+        done();
+      };
+
       const voice =
         voices.find(v => v.lang === "en-NG") ||
         voices.find(v => v.lang === "en-GH") ||
@@ -119,19 +125,32 @@ function speak(text: string, rate = 0.88, pitch = 1.05): Promise<void> {
         voices.find(v => v.name === "Samantha") ||
         voices.find(v => v.name.toLowerCase().includes("female") && v.lang.startsWith("en")) ||
         voices.find(v => v.lang === "en-GB" && !v.name.toLowerCase().includes("male")) ||
-        voices.find(v => v.lang.startsWith("en"));
+        voices.find(v => v.lang.startsWith("en")) ||
+        voices[0];
+
       if (voice) utt.voice = voice;
-      try { window.speechSynthesis.speak(utt); } catch { done(); }
+
+      try {
+        window.speechSynthesis.speak(utt);
+        // Android Chrome bug: stalls if page briefly loses focus
+        setTimeout(() => {
+          if (window.speechSynthesis.paused) window.speechSynthesis.resume();
+        }, 300);
+      } catch { done(); }
     };
 
-    if (window.speechSynthesis.getVoices().length > 0) {
-      trySpeak();
+    const voices = window.speechSynthesis.getVoices();
+    if (voices.length > 0) {
+      doSpeak(voices);
     } else {
-      const fallback = setTimeout(trySpeak, 1500);
-      window.speechSynthesis.onvoiceschanged = () => {
-        clearTimeout(fallback);
+      const fallbackTimer = setTimeout(() => {
         window.speechSynthesis.onvoiceschanged = null;
-        trySpeak();
+        doSpeak([]);
+      }, 2000);
+      window.speechSynthesis.onvoiceschanged = () => {
+        clearTimeout(fallbackTimer);
+        window.speechSynthesis.onvoiceschanged = null;
+        doSpeak(window.speechSynthesis.getVoices());
       };
     }
   });
@@ -461,7 +480,7 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
   const dailyJoined     = useRef(false);
   const phaseRef        = useRef<CallPhase>("init");
   const speechCancelled = useRef(false);
-  const callDataRef     = useRef<CallData | null>(null); // ref so handleTapToStart can read latest
+  const callDataRef     = useRef<CallData | null>(null);
   const callTimer       = useCallTimer(phase === "active");
 
   useEffect(() => { phaseRef.current = phase; }, [phase]);
@@ -470,6 +489,19 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
   // ── Pre-warm TTS voices ───────────────────────────────────────────────────
   useEffect(() => {
     if (window.speechSynthesis) window.speechSynthesis.getVoices();
+  }, []);
+
+  // ── STEP 1: Just validate auth, show tap screen immediately ──────────────
+  // Room creation is deferred to handleTapToStart so:
+  //   a) Admin isn't notified until the user actually commits to the call
+  //   b) AudioContext unlock, room creation, and TTS are all in the same gesture
+  useEffect(() => {
+    if (!auth.currentUser) {
+      setError("You must be signed in to start a call.");
+      setPhase("error");
+      return;
+    }
+    setPhase("tap_to_start");
   }, []);
 
   // ── Enumerate audio devices ───────────────────────────────────────────────
@@ -545,76 +577,74 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
     resumeJingle();
   }, [pauseJingle, resumeJingle]);
 
-  // ── STEP 1: Create room ───────────────────────────────────────────────────
-  useEffect(() => {
-    if (!auth.currentUser) {
-      setError("You must be signed in to start a call.");
-      setPhase("error");
-      return;
-    }
-    const createRoom = httpsCallable<unknown, {
-      success: boolean; callId: string; queuePosition: number;
-    }>(functions, "createSupportCallRoom");
-
-    createRoom({})
-      .then(res => {
-        if (!res.data.success) throw new Error("Room creation failed");
-        setCallId(res.data.callId);
-        setPhase("tap_to_start");
-      })
-      .catch(err => {
-        setError(err.message ?? "Could not start call.");
-        setPhase("error");
-      });
-  }, []);
-
   // ── STEP 2: Tap-to-start ─────────────────────────────────────────────────
-  // ALL audio is initiated here — iOS Safari requires audio to start
-  // within the same async chain as the user gesture (tap).
-  // Using useEffect to run speak() breaks iOS because the gesture context
-  // is lost by the time the effect fires.
+  // ALL audio AND room creation happen here, inside the user gesture.
+  // iOS Safari requires AudioContext + TTS to be triggered synchronously
+  // within the tap. A useEffect detour breaks this.
   const handleTapToStart = useCallback(async () => {
-    // 1. Unlock AudioContext — must be synchronous inside the tap
+    // 1. Unlock AudioContext synchronously inside the tap gesture
     try {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
       if (AudioCtx) {
         const ctx = new AudioCtx();
         await ctx.resume();
-        // Play a silent buffer to fully unlock audio on iOS
         const buf = ctx.createBuffer(1, 1, 22050);
         const src = ctx.createBufferSource();
         src.buffer = buf; src.connect(ctx.destination); src.start(0);
       }
     } catch { /**/ }
 
-    // 2. Request mic permission — get real device labels (not empty strings)
+    // 2. iOS TTS unlock — MUST be called synchronously (no await before this point
+    //    that could break the gesture chain). speak() the primer right now.
+    if (window.speechSynthesis) {
+      try {
+        const primer = new SpeechSynthesisUtterance(" ");
+        primer.volume = 0;
+        primer.rate = 1;
+        window.speechSynthesis.speak(primer);
+      } catch { /**/ }
+    }
+
+    // 3. Request mic permission so device labels are populated (not empty strings)
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       stream.getTracks().forEach(t => t.stop());
     } catch { /**/ }
 
+    // Cancel the silent primer now that audio context is unlocked
+    try { window.speechSynthesis?.cancel(); } catch { /**/ }
+
     await enumerateDevices();
 
-    // 3. Prime speechSynthesis on iOS — iOS requires speak() to be called
-    //    at least once synchronously within a gesture to unlock TTS.
-    //    A silent utterance is enough.
-    if (window.speechSynthesis) {
-      try {
-        const primer = new SpeechSynthesisUtterance(" ");
-        primer.volume = 0;
-        window.speechSynthesis.speak(primer);
-        // Small wait so the primer registers before we cancel it
-        await new Promise(r => setTimeout(r, 80));
-        window.speechSynthesis.cancel();
-      } catch { /**/ }
+    // 4. Create the room NOW (inside the gesture context).
+    //    Admin is notified here — not on mount — so they only see the call
+    //    after the user actually commits to talking.
+    let roomCallId: string | null = null;
+    let queuePos = 1;
+    try {
+      const createRoom = httpsCallable<unknown, {
+        success: boolean; callId: string; queuePosition: number;
+      }>(functions, "createSupportCallRoom");
+      const res = await createRoom({});
+      if (!res.data.success) throw new Error("Room creation failed");
+      roomCallId = res.data.callId;
+      queuePos   = res.data.queuePosition;
+      setCallId(roomCallId);
+    } catch (err: any) {
+      setError(err.message ?? "Could not start call.");
+      setPhase("error");
+      return;
     }
 
     speechCancelled.current = false;
     setPhase("greeting");
 
-    // 4. Run the FULL greeting here — still inside the gesture's async chain.
-    //    iOS keeps the audio unlock alive through awaits as long as execution
-    //    originates from the user tap. A useEffect detour breaks this.
+    // Fire admin notification now that user has committed (fire-and-forget)
+    if (roomCallId) {
+      const notify = httpsCallable(functions, "notifyAgentOfCall");
+      notify({ callId: roomCallId }).catch(() => {});
+    }
+
     const overallCap = setTimeout(() => {
       if (!speechCancelled.current) { setPhase("waiting"); startJingle(); }
     }, 35000);
@@ -625,9 +655,19 @@ export default function InternetCallPage({ onClose }: { onClose: () => void }) {
         h >= 5  && h < 12 ? "Good morning" :
         h >= 12 && h < 17 ? "Good afternoon" : "Good evening";
 
-      // Read latest callData via ref (state may not have updated yet)
-      const pos  = callDataRef.current?.queuePosition ?? 1;
+      const pos  = queuePos;
       const mins = Math.max(1, pos);
+
+      // Wait for voices to load — Android often needs this, iOS already unlocked above
+      await new Promise<void>(resolve => {
+        if (window.speechSynthesis.getVoices().length > 0) { resolve(); return; }
+        const t = setTimeout(resolve, 1500);
+        window.speechSynthesis.onvoiceschanged = () => {
+          clearTimeout(t);
+          window.speechSynthesis.onvoiceschanged = null;
+          resolve();
+        };
+      });
 
       if (speechCancelled.current) throw new Error("cancelled");
       await speak(`${tod}! Welcome to`);
