@@ -2731,16 +2731,6 @@ export const createSupportCallRoom = onCall({
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
   });
 
-  // Notify admins
-  await db.collection("adminNotifications").add({
-    type: "support_call_waiting",
-    callId: callRef.id,
-    userName,
-    userEmail: request.auth.token.email ?? "",
-    message: `${userName} is waiting for a support call`,
-    read: false,
-    createdAt: admin.firestore.FieldValue.serverTimestamp(),
-  });
 
   console.info(`[createSupportCallRoom] Room created for uid=${uid} callId=${callRef.id}`);
 
@@ -2753,6 +2743,9 @@ export const createSupportCallRoom = onCall({
     queuePosition,
   };
 });
+
+
+
 
 // ─────────────────────────────────────────
 // FUNCTION 29: generateAgentCallToken
