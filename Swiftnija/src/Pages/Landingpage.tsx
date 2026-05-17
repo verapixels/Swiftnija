@@ -5,19 +5,51 @@ import { useNavigate } from "react-router-dom";
 import { collection, getDocs } from "firebase/firestore";
 import { db } from "../firebase";
 import {
-  FiShoppingBag, FiLogIn, FiUserPlus, FiX, FiChevronRight,
-  FiMapPin, FiStar, FiShield, FiZap, FiClock, FiPackage,
-  FiInstagram, FiTwitter, FiFacebook, FiLinkedin,
-  FiPhone, FiMail, FiUsers, FiAward, FiHeart,
-  FiArrowRight, FiGrid, FiRefreshCw, FiChevronLeft,
-  FiShoppingCart, FiChevronDown, FiChevronUp,
-  FiHome, FiInfo, FiSettings, FiTruck,
+  FiShoppingBag,
+  FiLogIn,
+  FiUserPlus,
+  FiX,
+  FiChevronRight,
+  FiMapPin,
+  FiStar,
+  FiShield,
+  FiZap,
+  FiClock,
+  FiPackage,
+  FiInstagram,
+  FiTwitter,
+  FiFacebook,
+  FiLinkedin,
+  FiPhone,
+  FiMail,
+  FiUsers,
+  FiAward,
+  FiHeart,
+  FiArrowRight,
+  FiGrid,
+  FiRefreshCw,
+  FiChevronLeft,
+  FiShoppingCart,
+  FiChevronDown,
+  FiChevronUp,
+  FiHome,
+  FiInfo,
+  FiSettings,
+  FiTruck,
 } from "react-icons/fi";
 import {
-  MdRestaurant, MdLocalPharmacy, MdLocalGroceryStore,
-  MdStorefront, MdDirectionsBike, MdDeliveryDining,
+  MdRestaurant,
+  MdLocalPharmacy,
+  MdLocalGroceryStore,
+  MdStorefront,
+  MdDirectionsBike,
+  MdDeliveryDining,
 } from "react-icons/md";
-import { RiMotorbikeFill, RiStore2Line, RiVerifiedBadgeFill } from "react-icons/ri";
+import {
+  RiMotorbikeFill,
+  RiStore2Line,
+  RiVerifiedBadgeFill,
+} from "react-icons/ri";
 import { BsLightningChargeFill, BsBoxSeam } from "react-icons/bs";
 
 const ORANGE = "#FF6B00";
@@ -32,61 +64,86 @@ const LogoSVG = ({ size = 48 }: { size?: number }) => (
     style={{ display: "block", flexShrink: 0 }}
   >
     <g fill="#eb3e05">
-      <path d="M62.92 437.56 c0 -0.44 14.90 -14.55 33.92 -32 19.61 -18.04 45.42 -42.03 63.41 -58.99 9.05 -8.55 20.45 -19.27 25.32 -23.89 8.46 -7.91 67.94 -63.86 78.90 -74.18 2.85 -2.70 14.70 -13.86 26.30 -24.83 47.68 -45.03 47.93 -45.23 49.45 -45.23 1.08 0 1.08 0.10 -0.59 1.87 -2.56 2.70 -14.45 16.86 -18.58 22.12 -18.14 23.10 -26.79 47.59 -24.58 69.51 0.93 9 0.84 10.47 -0.74 14.40 -6.44 15.83 -13.08 25.07 -24.78 34.41 -4.23 3.39 -5.51 4.18 -6.88 4.18 l-1.67 0 0.34 -2.51 c0.20 -1.43 0.34 -5.36 0.34 -8.75 -0.05 -9.09 -2.06 -15.88 -6.05 -20.45 -1.23 -1.43 -1.87 -1.72 -3.39 -1.72 -1.08 0 -2.06 0.20 -2.21 0.49 -0.15 0.25 -0.98 0.79 -1.87 1.23 -0.88 0.44 -3.34 2.31 -5.51 4.18 -2.16 1.92 -4.57 3.83 -5.36 4.33 -0.84 0.44 -2.46 1.72 -3.69 2.80 -3.83 3.34 -7.13 5.95 -8.01 6.29 -1.13 0.39 -6.24 4.38 -9.49 7.37 -1.43 1.28 -2.75 2.31 -3.05 2.31 -0.25 0 -1.87 1.23 -3.59 2.70 -1.72 1.47 -3.29 2.70 -3.54 2.70 -0.25 0 -1.47 0.98 -2.75 2.11 -2.80 2.56 -8.85 7.23 -9.39 7.23 -0.25 0 -2.41 1.77 -4.77 3.93 -2.41 2.16 -4.67 3.93 -5.06 3.93 -0.39 0 -1.97 1.13 -3.54 2.46 -1.57 1.38 -3 2.46 -3.24 2.46 -0.20 0.05 -2.06 1.47 -4.08 3.20 -4.08 3.54 -10.96 9.05 -12.24 9.83 -0.44 0.29 -1.67 1.28 -2.80 2.21 -3 2.56 -7.82 6.29 -9.88 7.72 -2.11 1.38 -5.60 4.08 -10.13 7.77 -1.67 1.38 -3.93 3.15 -5.01 3.93 -1.08 0.84 -4.18 3.24 -6.83 5.41 -2.70 2.11 -5.51 4.33 -6.24 4.92 -0.79 0.54 -3.10 2.31 -5.16 3.93 -2.06 1.62 -4.38 3.39 -5.11 3.93 -2.06 1.52 -5.31 4.08 -10.37 8.11 -4.87 3.93 -5.31 4.23 -12.73 10.03 -2.56 2.02 -6.19 4.92 -8.11 6.39 -1.87 1.52 -4.42 3.49 -5.60 4.38 -1.23 0.84 -3 2.26 -3.93 3.10 -2.75 2.36 -6.49 5.11 -6.98 5.11 -0.25 0 -0.44 -0.20 -0.44 -0.44z"/>
+      <path d="M62.92 437.56 c0 -0.44 14.90 -14.55 33.92 -32 19.61 -18.04 45.42 -42.03 63.41 -58.99 9.05 -8.55 20.45 -19.27 25.32 -23.89 8.46 -7.91 67.94 -63.86 78.90 -74.18 2.85 -2.70 14.70 -13.86 26.30 -24.83 47.68 -45.03 47.93 -45.23 49.45 -45.23 1.08 0 1.08 0.10 -0.59 1.87 -2.56 2.70 -14.45 16.86 -18.58 22.12 -18.14 23.10 -26.79 47.59 -24.58 69.51 0.93 9 0.84 10.47 -0.74 14.40 -6.44 15.83 -13.08 25.07 -24.78 34.41 -4.23 3.39 -5.51 4.18 -6.88 4.18 l-1.67 0 0.34 -2.51 c0.20 -1.43 0.34 -5.36 0.34 -8.75 -0.05 -9.09 -2.06 -15.88 -6.05 -20.45 -1.23 -1.43 -1.87 -1.72 -3.39 -1.72 -1.08 0 -2.06 0.20 -2.21 0.49 -0.15 0.25 -0.98 0.79 -1.87 1.23 -0.88 0.44 -3.34 2.31 -5.51 4.18 -2.16 1.92 -4.57 3.83 -5.36 4.33 -0.84 0.44 -2.46 1.72 -3.69 2.80 -3.83 3.34 -7.13 5.95 -8.01 6.29 -1.13 0.39 -6.24 4.38 -9.49 7.37 -1.43 1.28 -2.75 2.31 -3.05 2.31 -0.25 0 -1.87 1.23 -3.59 2.70 -1.72 1.47 -3.29 2.70 -3.54 2.70 -0.25 0 -1.47 0.98 -2.75 2.11 -2.80 2.56 -8.85 7.23 -9.39 7.23 -0.25 0 -2.41 1.77 -4.77 3.93 -2.41 2.16 -4.67 3.93 -5.06 3.93 -0.39 0 -1.97 1.13 -3.54 2.46 -1.57 1.38 -3 2.46 -3.24 2.46 -0.20 0.05 -2.06 1.47 -4.08 3.20 -4.08 3.54 -10.96 9.05 -12.24 9.83 -0.44 0.29 -1.67 1.28 -2.80 2.21 -3 2.56 -7.82 6.29 -9.88 7.72 -2.11 1.38 -5.60 4.08 -10.13 7.77 -1.67 1.38 -3.93 3.15 -5.01 3.93 -1.08 0.84 -4.18 3.24 -6.83 5.41 -2.70 2.11 -5.51 4.33 -6.24 4.92 -0.79 0.54 -3.10 2.31 -5.16 3.93 -2.06 1.62 -4.38 3.39 -5.11 3.93 -2.06 1.52 -5.31 4.08 -10.37 8.11 -4.87 3.93 -5.31 4.23 -12.73 10.03 -2.56 2.02 -6.19 4.92 -8.11 6.39 -1.87 1.52 -4.42 3.49 -5.60 4.38 -1.23 0.84 -3 2.26 -3.93 3.10 -2.75 2.36 -6.49 5.11 -6.98 5.11 -0.25 0 -0.44 -0.20 -0.44 -0.44z" />
     </g>
     <g fill="#fd961b">
-      <path d="M127.67 356.79 c-5.21 -6.98 -11.99 -22.51 -14.35 -32.99 -2.46 -10.77 -3 -26.74 -1.23 -37.07 4.52 -26.40 18.29 -48.81 38.84 -63.17 6.88 -4.77 16.57 -9.73 24.14 -12.24 14.65 -4.92 28.71 -6.34 44.59 -4.52 4.52 0.49 11.16 0.79 17.80 0.79 9.05 0.05 11.80 -0.15 19.17 -1.28 10.57 -1.67 17.16 -3.10 24.83 -5.46 8.06 -2.51 11.01 -3.74 20.25 -8.21 5.80 -2.80 8.46 -3.88 9.83 -3.88 l1.87 0.05 -3.39 3.20 c-5.26 5.06 -18.68 13.37 -29.35 18.14 -19.32 8.75 -33.67 12.68 -55.01 15.24 -20.94 2.46 -32.59 5.46 -44.10 11.36 -28.22 14.50 -46.50 40.51 -52.01 74.13 -1.23 7.23 -2.36 23.25 -1.72 24.33 0.25 0.54 0.49 2.06 0.49 3.39 0 1.33 0.44 5.70 0.98 9.68 0.54 3.98 0.98 7.47 0.98 7.67 0 0.25 0.34 0.44 0.84 0.44 0.69 0 0.69 0.10 -0.10 0.98 -1.23 1.38 -1.97 1.23 -3.34 -0.59z"/>
+      <path d="M127.67 356.79 c-5.21 -6.98 -11.99 -22.51 -14.35 -32.99 -2.46 -10.77 -3 -26.74 -1.23 -37.07 4.52 -26.40 18.29 -48.81 38.84 -63.17 6.88 -4.77 16.57 -9.73 24.14 -12.24 14.65 -4.92 28.71 -6.34 44.59 -4.52 4.52 0.49 11.16 0.79 17.80 0.79 9.05 0.05 11.80 -0.15 19.17 -1.28 10.57 -1.67 17.16 -3.10 24.83 -5.46 8.06 -2.51 11.01 -3.74 20.25 -8.21 5.80 -2.80 8.46 -3.88 9.83 -3.88 l1.87 0.05 -3.39 3.20 c-5.26 5.06 -18.68 13.37 -29.35 18.14 -19.32 8.75 -33.67 12.68 -55.01 15.24 -20.94 2.46 -32.59 5.46 -44.10 11.36 -28.22 14.50 -46.50 40.51 -52.01 74.13 -1.23 7.23 -2.36 23.25 -1.72 24.33 0.25 0.54 0.49 2.06 0.49 3.39 0 1.33 0.44 5.70 0.98 9.68 0.54 3.98 0.98 7.47 0.98 7.67 0 0.25 0.34 0.44 0.84 0.44 0.69 0 0.69 0.10 -0.10 0.98 -1.23 1.38 -1.97 1.23 -3.34 -0.59z" />
     </g>
     <g fill="#f87915">
-      <path d="M94.88 433.58 c0 -1.62 7.37 -8.50 13.72 -12.73 9.59 -6.49 14.06 -8.90 16.32 -8.90 1.28 0 2.26 -0.34 2.90 -0.98 3.29 -3.29 8.21 -2.16 7.77 1.77 -0.15 1.38 -0.05 1.67 0.69 1.67 0.49 0 0.88 0.29 0.88 0.64 0 0.34 -1.97 1.23 -4.52 2.02 -4.33 1.38 -5.65 1.87 -10.91 4.18 -1.18 0.54 -3 1.13 -4.03 1.33 -2.36 0.44 -11.11 4.77 -17.75 8.85 -4.08 2.46 -5.06 2.90 -5.06 2.16z"/>
+      <path d="M94.88 433.58 c0 -1.62 7.37 -8.50 13.72 -12.73 9.59 -6.49 14.06 -8.90 16.32 -8.90 1.28 0 2.26 -0.34 2.90 -0.98 3.29 -3.29 8.21 -2.16 7.77 1.77 -0.15 1.38 -0.05 1.67 0.69 1.67 0.49 0 0.88 0.29 0.88 0.64 0 0.34 -1.97 1.23 -4.52 2.02 -4.33 1.38 -5.65 1.87 -10.91 4.18 -1.18 0.54 -3 1.13 -4.03 1.33 -2.36 0.44 -11.11 4.77 -17.75 8.85 -4.08 2.46 -5.06 2.90 -5.06 2.16z" />
     </g>
     <g fill="#ef7218">
-      <path d="M132.29 414.80 c-0.34 -0.88 -0.20 -1.23 0.44 -1.47 0.49 -0.20 1.03 -0.59 1.28 -0.93 0.20 -0.34 0.15 -0.49 -0.20 -0.25 -0.29 0.15 -0.64 -0.15 -0.84 -0.69 -0.20 -0.59 -0.54 -0.84 -0.88 -0.64 -0.34 0.20 -0.84 0.39 -1.13 0.44 -0.29 0.05 -1.13 0.64 -1.87 1.33 -0.98 0.88 -1.82 1.23 -3.15 1.18 -1.03 -0.05 -2.11 0.10 -2.46 0.34 -0.39 0.25 -0.59 -0.05 -0.59 -0.88 0 -1.13 0.64 -1.57 5.31 -3.93 7.13 -3.59 19.86 -8.55 28.86 -11.31 12.49 -3.79 22.12 -5.85 38.34 -8.16 18.68 -2.65 30.13 -5.90 42.28 -11.80 24.92 -12.14 42.37 -31.90 51.57 -58.35 3.44 -9.93 5.80 -21.78 6.49 -32.44 0.34 -4.82 0.39 -5.06 1.43 -5.06 0.98 0 1.28 0.59 2.36 4.57 3.24 11.40 4.72 24.92 3.83 35 -1.43 16.32 -5.95 30.72 -13.76 43.70 -8.01 13.22 -21.92 26.99 -32.69 32.25 -2.21 1.08 -4.72 2.51 -5.60 3.15 -1.82 1.38 -3.34 1.92 -11.16 4.23 -2.95 0.88 -5.65 1.82 -5.90 2.02 -0.64 0.49 -6.10 1.67 -11.45 2.46 -3.29 0.49 -6.24 0.49 -15.98 -0.10 -13.52 -0.79 -32.74 -0.74 -39.67 0.10 -6.73 0.84 -19.07 3.24 -25.02 4.92 -6.44 1.77 -9.24 1.87 -9.83 0.34z"/>
+      <path d="M132.29 414.80 c-0.34 -0.88 -0.20 -1.23 0.44 -1.47 0.49 -0.20 1.03 -0.59 1.28 -0.93 0.20 -0.34 0.15 -0.49 -0.20 -0.25 -0.29 0.15 -0.64 -0.15 -0.84 -0.69 -0.20 -0.59 -0.54 -0.84 -0.88 -0.64 -0.34 0.20 -0.84 0.39 -1.13 0.44 -0.29 0.05 -1.13 0.64 -1.87 1.33 -0.98 0.88 -1.82 1.23 -3.15 1.18 -1.03 -0.05 -2.11 0.10 -2.46 0.34 -0.39 0.25 -0.59 -0.05 -0.59 -0.88 0 -1.13 0.64 -1.57 5.31 -3.93 7.13 -3.59 19.86 -8.55 28.86 -11.31 12.49 -3.79 22.12 -5.85 38.34 -8.16 18.68 -2.65 30.13 -5.90 42.28 -11.80 24.92 -12.14 42.37 -31.90 51.57 -58.35 3.44 -9.93 5.80 -21.78 6.49 -32.44 0.34 -4.82 0.39 -5.06 1.43 -5.06 0.98 0 1.28 0.59 2.36 4.57 3.24 11.40 4.72 24.92 3.83 35 -1.43 16.32 -5.95 30.72 -13.76 43.70 -8.01 13.22 -21.92 26.99 -32.69 32.25 -2.21 1.08 -4.72 2.51 -5.60 3.15 -1.82 1.38 -3.34 1.92 -11.16 4.23 -2.95 0.88 -5.65 1.82 -5.90 2.02 -0.64 0.49 -6.10 1.67 -11.45 2.46 -3.29 0.49 -6.24 0.49 -15.98 -0.10 -13.52 -0.79 -32.74 -0.74 -39.67 0.10 -6.73 0.84 -19.07 3.24 -25.02 4.92 -6.44 1.77 -9.24 1.87 -9.83 0.34z" />
     </g>
     <g fill="#de3404">
-      <path d="M257.79 338.21 c2.11 -4.47 4.72 -12.39 4.72 -14.31 0 -1.08 0.84 -1.67 1.13 -0.84 0.10 0.39 1.57 -0.44 3.98 -2.26 8.16 -6.24 14.40 -12.98 19.22 -20.65 2.75 -4.42 7.18 -14.11 8.65 -19.02 0.59 -1.92 1.23 -3.29 1.43 -3.05 0.64 0.74 1.52 5.21 1.08 5.51 -0.25 0.15 -0.59 2.51 -0.79 5.21 -0.49 7.08 -1.62 14.35 -3.29 21.33 -1.67 6.69 -5.36 17.65 -6.64 19.61 -0.69 1.08 -0.88 1.13 -1.38 0.49 -0.54 -0.74 -0.88 -0.74 -3.24 -0.15 -0.69 0.20 -1.43 0.29 -1.72 0.29 -0.25 -0.05 -2.06 -0.10 -3.98 -0.20 -1.87 -0.10 -3.74 -0.34 -4.13 -0.59 -0.39 -0.25 -0.54 -0.20 -0.34 0.10 0.20 0.29 -1.23 0.49 -3.88 0.54 -3.98 0 -4.18 -0.05 -4.87 -1.28 -0.39 -0.74 -0.69 -1.03 -0.74 -0.69 0 0.84 -5.60 12.39 -6.59 13.62 -0.44 0.54 0.20 -1.13 1.38 -3.69z"/>
+      <path d="M257.79 338.21 c2.11 -4.47 4.72 -12.39 4.72 -14.31 0 -1.08 0.84 -1.67 1.13 -0.84 0.10 0.39 1.57 -0.44 3.98 -2.26 8.16 -6.24 14.40 -12.98 19.22 -20.65 2.75 -4.42 7.18 -14.11 8.65 -19.02 0.59 -1.92 1.23 -3.29 1.43 -3.05 0.64 0.74 1.52 5.21 1.08 5.51 -0.25 0.15 -0.59 2.51 -0.79 5.21 -0.49 7.08 -1.62 14.35 -3.29 21.33 -1.67 6.69 -5.36 17.65 -6.64 19.61 -0.69 1.08 -0.88 1.13 -1.38 0.49 -0.54 -0.74 -0.88 -0.74 -3.24 -0.15 -0.69 0.20 -1.43 0.29 -1.72 0.29 -0.25 -0.05 -2.06 -0.10 -3.98 -0.20 -1.87 -0.10 -3.74 -0.34 -4.13 -0.59 -0.39 -0.25 -0.54 -0.20 -0.34 0.10 0.20 0.29 -1.23 0.49 -3.88 0.54 -3.98 0 -4.18 -0.05 -4.87 -1.28 -0.39 -0.74 -0.69 -1.03 -0.74 -0.69 0 0.84 -5.60 12.39 -6.59 13.62 -0.44 0.54 0.20 -1.13 1.38 -3.69z" />
     </g>
   </svg>
 );
 
 // ─── types & helpers ──────────────────────────────────────────────────────────
 type Prod = {
-  id: string; name: string; price: string; img: string | null;
-  cat: string; store: string; rating: number; vendorId?: string;
+  id: string;
+  name: string;
+  price: string;
+  img: string | null;
+  cat: string;
+  store: string;
+  rating: number;
+  vendorId?: string;
   desc?: string;
 };
 
 function normCat(r = "") {
   const s = r.toLowerCase();
-  if (s.includes("restaurant") || s.includes("food") || s.includes("fast")) return "food";
-  if (s.includes("pharma") || s.includes("drug") || s.includes("medicine"))  return "pharmacy";
-  if (s.includes("grocer") || s.includes("supermarket"))                      return "groceries";
-  if (s.includes("fashion") || s.includes("cloth") || s.includes("boutique")) return "fashion";
-  if (s.includes("beauty") || s.includes("skin") || s.includes("makeup"))    return "beauty";
-  if (s.includes("electron") || s.includes("gadget") || s.includes("phone")) return "electronics";
+  if (s.includes("restaurant") || s.includes("food") || s.includes("fast"))
+    return "food";
+  if (s.includes("pharma") || s.includes("drug") || s.includes("medicine"))
+    return "pharmacy";
+  if (s.includes("grocer") || s.includes("supermarket")) return "groceries";
+  if (s.includes("fashion") || s.includes("cloth") || s.includes("boutique"))
+    return "fashion";
+  if (s.includes("beauty") || s.includes("skin") || s.includes("makeup"))
+    return "beauty";
+  if (s.includes("electron") || s.includes("gadget") || s.includes("phone"))
+    return "electronics";
   return "food";
 }
 function fmtP(p: any) {
-  const n = typeof p === "number" ? p : parseFloat(String(p).replace(/[^0-9.]/g, ""));
+  const n =
+    typeof p === "number" ? p : parseFloat(String(p).replace(/[^0-9.]/g, ""));
   return isNaN(n) ? String(p) : n.toLocaleString("en-NG");
 }
 async function fetchProds(): Promise<Prod[]> {
   const out: Prod[] = [];
   try {
     const snap = await getDocs(collection(db, "products"));
-    snap.forEach(d => {
+    snap.forEach((d) => {
       const r = d.data();
       if (r.inStock === false || r.available === false) return;
-      const img = [r.images?.[0], r.image, r.img].find((u: any) => u && !u.includes("supabase")) ?? null;
+      const img =
+        [r.images?.[0], r.image, r.img].find(
+          (u: any) => u && !u.includes("supabase"),
+        ) ?? null;
       out.push({
-        id: d.id, name: r.name || "Product", price: fmtP(r.price ?? 0), img,
-        cat: normCat(r.category || ""), store: r.businessName || r.storeName || r.vendorName || "Store",
-        rating: typeof r.rating === "number" ? r.rating : +(4 + Math.random()).toFixed(1),
-        vendorId: r.vendorId, desc: r.description || r.desc || "",
+        id: d.id,
+        name: r.name || "Product",
+        price: fmtP(r.price ?? 0),
+        img,
+        cat: normCat(r.category || ""),
+        store: r.businessName || r.storeName || r.vendorName || "Store",
+        rating:
+          typeof r.rating === "number"
+            ? r.rating
+            : +(4 + Math.random()).toFixed(1),
+        vendorId: r.vendorId,
+        desc: r.description || r.desc || "",
       });
     });
-  } catch (e) { console.error(e); }
-  return out.sort(() => Math.random() - .5);
+  } catch (e) {
+    console.error(e);
+  }
+  return out.sort(() => Math.random() - 0.5);
 }
 
 // 3D scroll observer hook
@@ -94,7 +151,12 @@ function use3DInView(th = 0.08) {
   const ref = useRef<HTMLElement>(null);
   const [v, sv] = useState(false);
   useEffect(() => {
-    const o = new IntersectionObserver(([e]) => { if (e.isIntersecting) sv(true); }, { threshold: th });
+    const o = new IntersectionObserver(
+      ([e]) => {
+        if (e.isIntersecting) sv(true);
+      },
+      { threshold: th },
+    );
     if (ref.current) o.observe(ref.current);
     return () => o.disconnect();
   }, []);
@@ -102,13 +164,13 @@ function use3DInView(th = 0.08) {
 }
 
 const CATS = [
-  { id: "all",         label: "All",         Icon: FiGrid },
-  { id: "food",        label: "Food",         Icon: MdRestaurant },
-  { id: "pharmacy",    label: "Pharmacy",     Icon: MdLocalPharmacy },
-  { id: "groceries",   label: "Groceries",    Icon: MdLocalGroceryStore },
-  { id: "fashion",     label: "Fashion",      Icon: MdStorefront },
-  { id: "beauty",      label: "Beauty",       Icon: FiHeart },
-  { id: "electronics", label: "Electronics",  Icon: BsLightningChargeFill },
+  { id: "all", label: "All", Icon: FiGrid },
+  { id: "food", label: "Food", Icon: MdRestaurant },
+  { id: "pharmacy", label: "Pharmacy", Icon: MdLocalPharmacy },
+  { id: "groceries", label: "Groceries", Icon: MdLocalGroceryStore },
+  { id: "fashion", label: "Fashion", Icon: MdStorefront },
+  { id: "beauty", label: "Beauty", Icon: FiHeart },
+  { id: "electronics", label: "Electronics", Icon: BsLightningChargeFill },
 ];
 
 // ─── CAROUSEL SLIDES ──────────────────────────────────────────────────────────
@@ -156,8 +218,8 @@ const DEFAULT_SLIDES = [
 // ═════════════════════════════════════════════════════════════════════════════
 function Navbar() {
   const nav = useNavigate();
-  const [open, setOpen]       = useState(false);
-  const [stuck, setStuck]     = useState(false);
+  const [open, setOpen] = useState(false);
+  const [stuck, setStuck] = useState(false);
   const [aboutOpen, setAbout] = useState(false);
 
   useEffect(() => {
@@ -168,10 +230,16 @@ function Navbar() {
 
   const scroll = (id: string) => {
     setOpen(false);
-    setTimeout(() => document.getElementById(id)?.scrollIntoView({ behavior: "smooth" }), 60);
+    setTimeout(
+      () => document.getElementById(id)?.scrollIntoView({ behavior: "smooth" }),
+      60,
+    );
   };
 
-  const go = (path: string) => { setOpen(false); nav(path); };
+  const go = (path: string) => {
+    setOpen(false);
+    nav(path);
+  };
 
   return (
     <>
@@ -180,7 +248,7 @@ function Navbar() {
         <div className="sn-nav-left">
           <button
             className={`sn-ham${open ? " sn-ham-open" : ""}`}
-            onClick={() => setOpen(v => !v)}
+            onClick={() => setOpen((v) => !v)}
             aria-label="Menu"
           >
             <span className="sn-line" />
@@ -188,108 +256,212 @@ function Navbar() {
             <span className="sn-line" />
           </button>
 
-          <div className="sn-logo" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}>
+          <div
+            className="sn-logo"
+            onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+          >
             <LogoSVG size={48} />
-            <span className="sn-logo-text-desktop">Swift<em>9ja</em></span>
+            <span className="sn-logo-text-desktop">
+              Swift<em>9ja</em>
+            </span>
           </div>
         </div>
 
         {/* CENTER: Nav links (desktop only) */}
         <nav className="sn-nav-links">
-          <button className="sn-nav-link" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}>
+          <button
+            className="sn-nav-link"
+            onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+          >
             Home
           </button>
 
           <div className="sn-nav-dropdown-wrap">
-            <button className="sn-nav-link sn-nav-link-drop" onClick={() => scroll("sn-about")}>
+            <button
+              className="sn-nav-link sn-nav-link-drop"
+              onClick={() => scroll("sn-about")}
+            >
               About <FiChevronDown size={11} />
             </button>
             <div className="sn-nav-dropdown">
-              <button className="sn-nav-dditem" onClick={() => go("/about/founder")}>About Founder</button>
-              <button className="sn-nav-dditem" onClick={() => go("/about/team")}>Meet the Team</button>
-              <button className="sn-nav-dditem" onClick={() => go("/about/company")}>About Company</button>
+              <button
+                className="sn-nav-dditem"
+                onClick={() => go("/about/founder")}
+              >
+                About Founder
+              </button>
+              <button
+                className="sn-nav-dditem"
+                onClick={() => go("/about/team")}
+              >
+                Meet the Team
+              </button>
+              <button
+                className="sn-nav-dditem"
+                onClick={() => go("/about/company")}
+              >
+                About Company
+              </button>
             </div>
           </div>
 
-          <button className="sn-nav-link" onClick={() => go("/services")}>Services</button>
-          <button className="sn-nav-link sn-nav-link-hot" onClick={() => go("/vendor/register")}>
+          <button className="sn-nav-link" onClick={() => go("/services")}>
+            Services
+          </button>
+          <button
+            className="sn-nav-link sn-nav-link-hot"
+            onClick={() => go("/vendor/register")}
+          >
             Vendor
           </button>
-          <button className="sn-nav-link sn-nav-link-hot" onClick={() => go("/rider/signup")}>
+          <button
+            className="sn-nav-link sn-nav-link-hot"
+            onClick={() => go("/rider/signup")}
+          >
             Rider
           </button>
         </nav>
 
         {/* RIGHT: Auth buttons */}
         <div className="sn-auth">
-          <button className="sn-auth-login"  onClick={() => nav("/login")}>Login</button>
-          <button className="sn-auth-signup" onClick={() => nav("/signup")}>Sign Up</button>
+          <button className="sn-auth-login" onClick={() => nav("/login")}>
+            Login
+          </button>
+          <button className="sn-auth-signup" onClick={() => nav("/signup")}>
+            Sign Up
+          </button>
         </div>
       </header>
 
       {/* Backdrop */}
-      <div className={`sn-backdrop${open ? " sn-back-on" : ""}`} onClick={() => setOpen(false)} />
+      <div
+        className={`sn-backdrop${open ? " sn-back-on" : ""}`}
+        onClick={() => setOpen(false)}
+      />
 
       {/* Mobile Drawer */}
       <nav className={`sn-drawer${open ? " sn-drawer-on" : ""}`}>
         <div className="sn-drawer-head">
           <div className="sn-logo">
             <LogoSVG size={40} />
-            <span style={{ display:"inline", fontSize:20, fontFamily:"'Playfair Display',serif", fontWeight:900, color:"#f0f0fa" }}>Swift<em style={{ color: ORANGE, fontStyle:"italic" }}>9ja</em></span>
+            <span
+              style={{
+                display: "inline",
+                fontSize: 20,
+                fontFamily: "'Playfair Display',serif",
+                fontWeight: 900,
+                color: "#f0f0fa",
+              }}
+            >
+              Swift<em style={{ color: ORANGE, fontStyle: "italic" }}>9ja</em>
+            </span>
           </div>
-          <button className="sn-drawer-x" onClick={() => setOpen(false)}><FiX size={18} /></button>
+          <button className="sn-drawer-x" onClick={() => setOpen(false)}>
+            <FiX size={18} />
+          </button>
         </div>
 
         <div className="sn-drawer-body">
-          <button className="sn-ditem sn-ditem-accent" onClick={() => { window.scrollTo({ top: 0, behavior: "smooth" }); setOpen(false); }}>
+          <button
+            className="sn-ditem sn-ditem-accent"
+            onClick={() => {
+              window.scrollTo({ top: 0, behavior: "smooth" });
+              setOpen(false);
+            }}
+          >
             <FiHome size={15} className="sn-dico" />
             <span className="sn-dlabel">HOME</span>
           </button>
 
           <div className="sn-dsub-wrap">
-            <button className="sn-ditem sn-ditem-accent" onClick={() => setAbout(v => !v)}>
+            <button
+              className="sn-ditem sn-ditem-accent"
+              onClick={() => setAbout((v) => !v)}
+            >
               <FiInfo size={15} className="sn-dico" />
               <span className="sn-dlabel">ABOUT</span>
-              <span className="sn-darrow">{aboutOpen ? <FiChevronUp size={13} /> : <FiChevronDown size={13} />}</span>
+              <span className="sn-darrow">
+                {aboutOpen ? (
+                  <FiChevronUp size={13} />
+                ) : (
+                  <FiChevronDown size={13} />
+                )}
+              </span>
             </button>
             {aboutOpen && (
               <div className="sn-submenu">
-                <button className="sn-dsubitem" onClick={() => go("/about/founder")}>
+                <button
+                  className="sn-dsubitem"
+                  onClick={() => go("/about/founder")}
+                >
                   <FiChevronRight size={10} color={ORANGE} /> About Founder
                 </button>
-                <button className="sn-dsubitem" onClick={() => go("/about/team")}>
+                <button
+                  className="sn-dsubitem"
+                  onClick={() => go("/about/team")}
+                >
                   <FiChevronRight size={10} color={ORANGE} /> Meet the Team
                 </button>
-                <button className="sn-dsubitem" onClick={() => go("/about/company")}>
+                <button
+                  className="sn-dsubitem"
+                  onClick={() => go("/about/company")}
+                >
                   <FiChevronRight size={10} color={ORANGE} /> About Company
                 </button>
               </div>
             )}
           </div>
 
-          <button className="sn-ditem sn-ditem-accent" onClick={() => go("/services")}>
+          <button
+            className="sn-ditem sn-ditem-accent"
+            onClick={() => go("/services")}
+          >
             <FiSettings size={15} className="sn-dico" />
             <span className="sn-dlabel">OUR SERVICES</span>
           </button>
 
           <div className="sn-divider" />
 
-          <button className="sn-ditem sn-ditem-special" onClick={() => go("/vendor/register")}>
-            <RiStore2Line size={16} className="sn-dico" style={{ color: ORANGE }} />
-            <span className="sn-dlabel" style={{ color: ORANGE }}>BECOME A VENDOR</span>
+          <button
+            className="sn-ditem sn-ditem-special"
+            onClick={() => go("/vendor/register")}
+          >
+            <RiStore2Line
+              size={16}
+              className="sn-dico"
+              style={{ color: ORANGE }}
+            />
+            <span className="sn-dlabel" style={{ color: ORANGE }}>
+              BECOME A VENDOR
+            </span>
           </button>
 
-          <button className="sn-ditem sn-ditem-special" onClick={() => go("/rider/signup")}>
-            <RiMotorbikeFill size={16} className="sn-dico" style={{ color: ORANGE }} />
-            <span className="sn-dlabel" style={{ color: ORANGE }}>BECOME A RIDER</span>
+          <button
+            className="sn-ditem sn-ditem-special"
+            onClick={() => go("/rider/signup")}
+          >
+            <RiMotorbikeFill
+              size={16}
+              className="sn-dico"
+              style={{ color: ORANGE }}
+            />
+            <span className="sn-dlabel" style={{ color: ORANGE }}>
+              BECOME A RIDER
+            </span>
           </button>
         </div>
 
         <div className="sn-drawer-foot">
-          <button className="sn-auth-login sn-d100" onClick={() => go("/login")}>
+          <button
+            className="sn-auth-login sn-d100"
+            onClick={() => go("/login")}
+          >
             <FiLogIn size={14} /> Login
           </button>
-          <button className="sn-auth-signup sn-d100" onClick={() => go("/signup")}>
+          <button
+            className="sn-auth-signup sn-d100"
+            onClick={() => go("/signup")}
+          >
             <FiUserPlus size={14} /> Create Account
           </button>
         </div>
@@ -303,34 +475,45 @@ function Navbar() {
 // ═════════════════════════════════════════════════════════════════════════════
 function Hero() {
   const nav = useNavigate();
-  const [cur, setCur]        = useState(0);
-  const [prev, setPrev]      = useState<number | null>(null);
-  const [dir, setDir]        = useState<"next" | "prev">("next");
+  const [cur, setCur] = useState(0);
+  const [prev, setPrev] = useState<number | null>(null);
+  const [dir, setDir] = useState<"next" | "prev">("next");
   const [animating, setAnim] = useState(false);
-  const timerRef             = useRef<ReturnType<typeof setInterval> | null>(null);
-  const SLIDES               = DEFAULT_SLIDES;
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const SLIDES = DEFAULT_SLIDES;
 
-  const go = useCallback((next: number, direction: "next" | "prev" = "next") => {
-    if (animating) return;
-    setDir(direction);
-    setPrev(cur);
-    setCur(next);
-    setAnim(true);
-    setTimeout(() => { setPrev(null); setAnim(false); }, 700);
-  }, [cur, animating]);
+  const go = useCallback(
+    (next: number, direction: "next" | "prev" = "next") => {
+      if (animating) return;
+      setDir(direction);
+      setPrev(cur);
+      setCur(next);
+      setAnim(true);
+      setTimeout(() => {
+        setPrev(null);
+        setAnim(false);
+      }, 700);
+    },
+    [cur, animating],
+  );
 
   useEffect(() => {
     timerRef.current = setInterval(() => {
-      setCur(c => {
+      setCur((c) => {
         const next = (c + 1) % SLIDES.length;
         setDir("next");
         setPrev(c);
         setAnim(true);
-        setTimeout(() => { setPrev(null); setAnim(false); }, 700);
+        setTimeout(() => {
+          setPrev(null);
+          setAnim(false);
+        }, 700);
         return next;
       });
     }, 5000);
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
   }, [SLIDES.length]);
 
   const slide = SLIDES[cur];
@@ -339,23 +522,37 @@ function Hero() {
     <section className="sn-hero" style={{ background: slide.bg }}>
       <div className="sn-hero-3d-wrap">
         {prev !== null && (
-          <div className={`sn-hero-collage sn-collage-exit${dir === "next" ? "-next" : "-prev"}`}>
+          <div
+            className={`sn-hero-collage sn-collage-exit${dir === "next" ? "-next" : "-prev"}`}
+          >
             {SLIDES[prev].imgs.map((src, i) => (
               <div key={`prev-${i}`} className={`sn-collage-img sn-ci${i}`}>
-                <img src={src} alt="" onError={e => (e.currentTarget.src = "https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?w=400&q=80")} />
+                <img
+                  src={src}
+                  alt=""
+                  onError={(e) =>
+                    (e.currentTarget.src =
+                      "https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?w=400&q=80")
+                  }
+                />
               </div>
             ))}
             <div className="sn-hero-collage-overlay" />
           </div>
         )}
 
-        <div className={`sn-hero-collage${animating ? (dir === "next" ? " sn-collage-enter-next" : " sn-collage-enter-prev") : ""}`}>
+        <div
+          className={`sn-hero-collage${animating ? (dir === "next" ? " sn-collage-enter-next" : " sn-collage-enter-prev") : ""}`}
+        >
           {slide.imgs.map((src, i) => (
             <div key={`${cur}-${i}`} className={`sn-collage-img sn-ci${i}`}>
               <img
                 src={src}
                 alt=""
-                onError={e => (e.currentTarget.src = "https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?w=400&q=80")}
+                onError={(e) =>
+                  (e.currentTarget.src =
+                    "https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?w=400&q=80")
+                }
               />
             </div>
           ))}
@@ -367,35 +564,60 @@ function Hero() {
       <div className="sn-hero-text" key={cur}>
         <h1 className="sn-h1">
           {slide.headline.split("\n").map((line, i) => (
-            <span key={i} className="sn-h1-line">{line}<br /></span>
+            <span key={i} className="sn-h1-line">
+              {line}
+              <br />
+            </span>
           ))}
         </h1>
         <p className="sn-hero-sub">{slide.sub}</p>
         <div className="sn-hero-ctas">
-          <button className="sn-btn-primary sn-btn-3d" onClick={() => nav("/signup")}>
+          <button
+            className="sn-btn-primary sn-btn-3d"
+            onClick={() => nav("/signup")}
+          >
             Order Now <FiArrowRight size={14} />
           </button>
-          <button className="sn-btn-ghost" onClick={() => document.getElementById("sn-products")?.scrollIntoView({ behavior: "smooth" })}>
+          <button
+            className="sn-btn-ghost"
+            onClick={() =>
+              document
+                .getElementById("sn-products")
+                ?.scrollIntoView({ behavior: "smooth" })
+            }
+          >
             Browse All Categories
           </button>
         </div>
       </div>
 
-      <button className="sn-car-btn sn-car-l" onClick={() => go((cur - 1 + SLIDES.length) % SLIDES.length, "prev")}>
+      <button
+        className="sn-car-btn sn-car-l"
+        onClick={() => go((cur - 1 + SLIDES.length) % SLIDES.length, "prev")}
+      >
         <FiChevronLeft size={20} />
       </button>
-      <button className="sn-car-btn sn-car-r" onClick={() => go((cur + 1) % SLIDES.length, "next")}>
+      <button
+        className="sn-car-btn sn-car-r"
+        onClick={() => go((cur + 1) % SLIDES.length, "next")}
+      >
         <FiChevronRight size={20} />
       </button>
 
       <div className="sn-car-dots">
         {SLIDES.map((_, i) => (
-          <button key={i} className={`sn-dot${i === cur ? " sn-dot-on" : ""}`} onClick={() => go(i, i > cur ? "next" : "prev")} />
+          <button
+            key={i}
+            className={`sn-dot${i === cur ? " sn-dot-on" : ""}`}
+            onClick={() => go(i, i > cur ? "next" : "prev")}
+          />
         ))}
       </div>
 
       <div className="sn-particles">
-        {[...Array(8)].map((_, i) => <div key={i} className={`sn-particle sn-p${i}`} />)}
+        {[...Array(8)].map((_, i) => (
+          <div key={i} className={`sn-particle sn-p${i}`} />
+        ))}
       </div>
     </section>
   );
@@ -426,114 +648,305 @@ function BuyPopup({ p, onClose }: { p: Prod; onClose: () => void }) {
     <div
       onClick={close}
       style={{
-        position: "fixed", inset: 0, zIndex: 99999,
+        position: "fixed",
+        inset: 0,
+        zIndex: 99999,
         background: "rgba(0,0,0,0.88)",
         backdropFilter: "blur(18px)",
         WebkitBackdropFilter: "blur(18px)",
-        display: "flex", alignItems: "center", justifyContent: "center",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
         padding: "20px",
         opacity: show ? 1 : 0,
         transition: "opacity 0.25s ease",
       }}
     >
       <div
-        onClick={e => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
         style={{
           position: "relative",
           background: "linear-gradient(135deg, #12121e, #140c05)",
           border: "1px solid rgba(255,107,0,0.25)",
           borderRadius: 24,
           padding: "32px 26px 24px",
-          maxWidth: 420, width: "100%",
-          boxShadow: "0 24px 80px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,107,0,0.08) inset",
-          transform: show ? "translateY(0) scale(1)" : "translateY(40px) scale(0.93)",
+          maxWidth: 420,
+          width: "100%",
+          boxShadow:
+            "0 24px 80px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,107,0,0.08) inset",
+          transform: show
+            ? "translateY(0) scale(1)"
+            : "translateY(40px) scale(0.93)",
           opacity: show ? 1 : 0,
-          transition: "transform 0.3s cubic-bezier(.32,1,.4,1), opacity 0.3s ease",
+          transition:
+            "transform 0.3s cubic-bezier(.32,1,.4,1), opacity 0.3s ease",
         }}
       >
         <button
           onClick={close}
           style={{
-            position:"absolute", top:12, right:12, width:30, height:30,
-            borderRadius:8, background:"rgba(255,255,255,0.05)",
-            border:"1px solid #1e1e32", color:"#7878a0",
-            display:"flex", alignItems:"center", justifyContent:"center",
-            cursor:"pointer", transition:"all .18s",
+            position: "absolute",
+            top: 12,
+            right: 12,
+            width: 30,
+            height: 30,
+            borderRadius: 8,
+            background: "rgba(255,255,255,0.05)",
+            border: "1px solid #1e1e32",
+            color: "#7878a0",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: "pointer",
+            transition: "all .18s",
           }}
-          onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(239,68,68,0.15)"; (e.currentTarget as HTMLButtonElement).style.color = "#ef4444"; }}
-          onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.05)"; (e.currentTarget as HTMLButtonElement).style.color = "#7878a0"; }}
+          onMouseEnter={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.background =
+              "rgba(239,68,68,0.15)";
+            (e.currentTarget as HTMLButtonElement).style.color = "#ef4444";
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.background =
+              "rgba(255,255,255,0.05)";
+            (e.currentTarget as HTMLButtonElement).style.color = "#7878a0";
+          }}
         >
           <FiX size={15} />
         </button>
 
-        <div style={{ display:"flex", gap:12, background:"#141420", border:"1px solid #1e1e32", borderRadius:14, padding:12, marginBottom:16 }}>
-          <div style={{ width:64, height:64, borderRadius:10, overflow:"hidden", flexShrink:0, background:"#0f0f18" }}>
-            {p.img
-              ? <img src={p.img} alt={p.name} style={{ width:"100%", height:"100%", objectFit:"cover", display:"block" }} />
-              : <div style={{ width:"100%", height:"100%", display:"flex", alignItems:"center", justifyContent:"center" }}><FiPackage size={28} color="#666" /></div>}
+        <div
+          style={{
+            display: "flex",
+            gap: 12,
+            background: "#141420",
+            border: "1px solid #1e1e32",
+            borderRadius: 14,
+            padding: 12,
+            marginBottom: 16,
+          }}
+        >
+          <div
+            style={{
+              width: 64,
+              height: 64,
+              borderRadius: 10,
+              overflow: "hidden",
+              flexShrink: 0,
+              background: "#0f0f18",
+            }}
+          >
+            {p.img ? (
+              <img
+                src={p.img}
+                alt={p.name}
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  objectFit: "cover",
+                  display: "block",
+                }}
+              />
+            ) : (
+              <div
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <FiPackage size={28} color="#666" />
+              </div>
+            )}
           </div>
           <div>
-            <div style={{ fontSize:13.5, fontWeight:700, color:"#f0f0fa", marginBottom:3 }}>{p.name}</div>
-            <div style={{ fontSize:10.5, color:"#7878a0", display:"flex", alignItems:"center", gap:3, marginBottom:4 }}>
+            <div
+              style={{
+                fontSize: 13.5,
+                fontWeight: 700,
+                color: "#f0f0fa",
+                marginBottom: 3,
+              }}
+            >
+              {p.name}
+            </div>
+            <div
+              style={{
+                fontSize: 10.5,
+                color: "#7878a0",
+                display: "flex",
+                alignItems: "center",
+                gap: 3,
+                marginBottom: 4,
+              }}
+            >
               <RiVerifiedBadgeFill size={11} color="#3b82f6" /> {p.store}
             </div>
-            <div style={{ fontFamily:"'Playfair Display',serif", fontSize:18, fontWeight:700, color:ORANGE }}>₦{p.price}</div>
-            <div style={{ display:"flex", alignItems:"center", gap:3, fontSize:11, fontWeight:600, color:"#f59e0b", marginTop:3 }}>
-              <FiStar size={11} fill="#f59e0b" color="#f59e0b" /> {p.rating.toFixed(1)}
+            <div
+              style={{
+                fontFamily: "'Playfair Display',serif",
+                fontSize: 18,
+                fontWeight: 700,
+                color: ORANGE,
+              }}
+            >
+              ₦{p.price}
+            </div>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 3,
+                fontSize: 11,
+                fontWeight: 600,
+                color: "#f59e0b",
+                marginTop: 3,
+              }}
+            >
+              <FiStar size={11} fill="#f59e0b" color="#f59e0b" />{" "}
+              {p.rating.toFixed(1)}
             </div>
           </div>
         </div>
 
-        <div style={{ height:1, background:"rgba(255,107,0,0.1)", marginBottom:18 }} />
+        <div
+          style={{
+            height: 1,
+            background: "rgba(255,107,0,0.1)",
+            marginBottom: 18,
+          }}
+        />
 
-        <div style={{ textAlign:"center", marginBottom:18 }}>
-          <div style={{ display:"flex", justifyContent:"center", marginBottom:10 }}>
+        <div style={{ textAlign: "center", marginBottom: 18 }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "center",
+              marginBottom: 10,
+            }}
+          >
             <FiShoppingBag size={32} color={ORANGE} />
           </div>
-          <h2 style={{ fontFamily:"'Playfair Display',serif", fontSize:20, fontWeight:700, color:"#f0f0fa", marginBottom:8 }}>
+          <h2
+            style={{
+              fontFamily: "'Playfair Display',serif",
+              fontSize: 20,
+              fontWeight: 700,
+              color: "#f0f0fa",
+              marginBottom: 8,
+            }}
+          >
             Ready to order?
           </h2>
-          <p style={{ fontSize:13, color:"#7878a0", lineHeight:1.7, maxWidth:300, margin:"0 auto" }}>
-            Create a free SwiftNija account to place orders and track deliveries in real time.
+          <p
+            style={{
+              fontSize: 13,
+              color: "#7878a0",
+              lineHeight: 1.7,
+              maxWidth: 300,
+              margin: "0 auto",
+            }}
+          >
+            Create a free SwiftNija account to place orders and track deliveries
+            in real time.
           </p>
         </div>
 
-        <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:14 }}>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+            marginBottom: 14,
+          }}
+        >
           <button
             onClick={() => nav("/signup")}
             style={{
-              display:"flex", alignItems:"center", justifyContent:"center", gap:7,
-              background:"linear-gradient(135deg,#FF6B00,#FF8C33)",
-              color:"#fff", border:"none", borderRadius:12, padding:"13px 18px",
-              fontFamily:"'Plus Jakarta Sans',sans-serif", fontSize:14, fontWeight:700,
-              cursor:"pointer", boxShadow:"0 4px 16px rgba(255,107,0,0.35)",
-              transition:"all .18s",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 7,
+              background: "linear-gradient(135deg,#FF6B00,#FF8C33)",
+              color: "#fff",
+              border: "none",
+              borderRadius: 12,
+              padding: "13px 18px",
+              fontFamily: "'Plus Jakarta Sans',sans-serif",
+              fontSize: 14,
+              fontWeight: 700,
+              cursor: "pointer",
+              boxShadow: "0 4px 16px rgba(255,107,0,0.35)",
+              transition: "all .18s",
             }}
-            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.transform = "translateY(-2px)"; (e.currentTarget as HTMLButtonElement).style.boxShadow = "0 8px 24px rgba(255,107,0,0.5)"; }}
-            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.transform = ""; (e.currentTarget as HTMLButtonElement).style.boxShadow = "0 4px 16px rgba(255,107,0,0.35)"; }}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.transform =
+                "translateY(-2px)";
+              (e.currentTarget as HTMLButtonElement).style.boxShadow =
+                "0 8px 24px rgba(255,107,0,0.5)";
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.transform = "";
+              (e.currentTarget as HTMLButtonElement).style.boxShadow =
+                "0 4px 16px rgba(255,107,0,0.35)";
+            }}
           >
             <FiUserPlus size={16} /> Create Free Account
           </button>
           <button
             onClick={() => nav("/login")}
             style={{
-              background:"rgba(255,255,255,0.04)", border:"1px solid #2a2a44",
-              color:"#7878a0", borderRadius:12, padding:"12px 18px",
-              fontFamily:"'Plus Jakarta Sans',sans-serif", fontSize:13.5, fontWeight:600,
-              cursor:"pointer", transition:"all .15s",
+              background: "rgba(255,255,255,0.04)",
+              border: "1px solid #2a2a44",
+              color: "#7878a0",
+              borderRadius: 12,
+              padding: "12px 18px",
+              fontFamily: "'Plus Jakarta Sans',sans-serif",
+              fontSize: 13.5,
+              fontWeight: 600,
+              cursor: "pointer",
+              transition: "all .15s",
             }}
-            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = "#FF6B00"; (e.currentTarget as HTMLButtonElement).style.color = "#FF6B00"; }}
-            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = "#2a2a44"; (e.currentTarget as HTMLButtonElement).style.color = "#7878a0"; }}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.borderColor =
+                "#FF6B00";
+              (e.currentTarget as HTMLButtonElement).style.color = "#FF6B00";
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.borderColor =
+                "#2a2a44";
+              (e.currentTarget as HTMLButtonElement).style.color = "#7878a0";
+            }}
           >
-            <FiLogIn size={15} style={{ marginRight:6, verticalAlign:"middle" }} />
+            <FiLogIn
+              size={15}
+              style={{ marginRight: 6, verticalAlign: "middle" }}
+            />
             Already have an account? Login
           </button>
         </div>
 
-        <div style={{ display:"flex", justifyContent:"center", gap:14, flexWrap:"wrap", fontSize:10.5, fontWeight:600, color:"#30304a" }}>
-          <span style={{ display:"flex", alignItems:"center", gap:4 }}><FiShield size={11} color="#10B981" /> Free to join</span>
-          <span style={{ display:"flex", alignItems:"center", gap:4 }}><FiZap size={11} color={ORANGE} /> Instant checkout</span>
-          <span style={{ display:"flex", alignItems:"center", gap:4 }}><FiClock size={11} color={ORANGE} /> 15 min avg delivery</span>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "center",
+            gap: 14,
+            flexWrap: "wrap",
+            fontSize: 10.5,
+            fontWeight: 600,
+            color: "#30304a",
+          }}
+        >
+          <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <FiShield size={11} color="#10B981" /> Free to join
+          </span>
+          <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <FiZap size={11} color={ORANGE} /> Instant checkout
+          </span>
+          <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <FiClock size={11} color={ORANGE} /> 15 min avg delivery
+          </span>
         </div>
       </div>
     </div>
@@ -545,10 +958,19 @@ function BuyPopup({ p, onClose }: { p: Prod; onClose: () => void }) {
 // ═════════════════════════════════════════════════════════════════════════════
 //  PRODUCT CARD
 // ═════════════════════════════════════════════════════════════════════════════
-function ProductCard({ p, onBuy, index }: { p: Prod; onBuy: (p: Prod) => void; index: number }) {
-  const [liked, setLiked]   = useState(false);
+function ProductCard({
+  p,
+  onBuy,
+  index,
+}: {
+  p: Prod;
+  onBuy: (p: Prod) => void;
+  index: number;
+}) {
+  const [liked, setLiked] = useState(false);
   const [imgErr, setImgErr] = useState(false);
-  const FALLBACK = "https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?w=400&q=80";
+  const FALLBACK =
+    "https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?w=400&q=80";
 
   return (
     <div className="sn-pcard" style={{ "--ci": index } as any}>
@@ -559,13 +981,28 @@ function ProductCard({ p, onBuy, index }: { p: Prod; onBuy: (p: Prod) => void; i
           className="sn-pimg"
           onError={() => setImgErr(true)}
         />
-        <button className="sn-plove" onClick={e => { e.stopPropagation(); setLiked(v => !v); }}>
-          <FiHeart size={13} fill={liked ? "#ef4444" : "none"} color={liked ? "#ef4444" : "#aaa"} />
+        <button
+          className="sn-plove"
+          onClick={(e) => {
+            e.stopPropagation();
+            setLiked((v) => !v);
+          }}
+        >
+          <FiHeart
+            size={13}
+            fill={liked ? "#ef4444" : "none"}
+            color={liked ? "#ef4444" : "#aaa"}
+          />
         </button>
       </div>
       <div className="sn-pbody">
         <div className="sn-pname">{p.name}</div>
-        {p.desc && <div className="sn-pdesc">{p.desc.slice(0, 60)}{p.desc.length > 60 ? "..." : ""}</div>}
+        {p.desc && (
+          <div className="sn-pdesc">
+            {p.desc.slice(0, 60)}
+            {p.desc.length > 60 ? "..." : ""}
+          </div>
+        )}
         <div className="sn-pprice">₦{p.price}</div>
         <button className="sn-pbuy" onClick={() => onBuy(p)}>
           <FiShoppingCart size={13} /> Add to Cart
@@ -579,34 +1016,57 @@ function ProductCard({ p, onBuy, index }: { p: Prod; onBuy: (p: Prod) => void; i
 //  PRODUCTS SECTION
 // ═════════════════════════════════════════════════════════════════════════════
 function Products() {
-  const [prods, setProds]  = useState<Prod[]>([]);
+  const [prods, setProds] = useState<Prod[]>([]);
   const [loading, setLoad] = useState(true);
-  const [cat, setCat]      = useState("all");
-  const [popup, setPopup]  = useState<Prod | null>(null);
-  const { ref, v }         = use3DInView();
+  const [cat, setCat] = useState("all");
+  const [popup, setPopup] = useState<Prod | null>(null);
+  const { ref, v } = use3DInView();
 
-  const load = useCallback(async () => { setLoad(true); setProds(await fetchProds()); setLoad(false); }, []);
-  useEffect(() => { load(); }, [load]);
+  const load = useCallback(async () => {
+    setLoad(true);
+    setProds(await fetchProds());
+    setLoad(false);
+  }, []);
+  useEffect(() => {
+    load();
+  }, [load]);
 
-  const shown = cat === "all" ? prods : prods.filter(p => p.cat === cat);
+  const shown = cat === "all" ? prods : prods.filter((p) => p.cat === cat);
 
   return (
-    <section id="sn-products" className="sn-section sn-3d-section" ref={ref as any}>
+    <section
+      id="sn-products"
+      className="sn-section sn-3d-section"
+      ref={ref as any}
+    >
       <div className="sn-wrap">
         <div className={`sn-prod-header-clean${v ? " sn-3d-visible" : ""}`}>
-          <span className="sn-kicker"><FiGrid size={11} /> Featured Products</span>
+          <span className="sn-kicker">
+            <FiGrid size={11} /> Featured Products
+          </span>
           <h2 className="sn-prod-h3d">Shop Popular Categories</h2>
           <span className="sn-prod-browse-link">Browse All →</span>
         </div>
 
         <div className={`sn-cat-row${v ? " sn-visible" : ""}`}>
-          {CATS.map(c => (
-            <button key={c.id} className={`sn-cat${cat === c.id ? " sn-cat-on" : ""}`} onClick={() => setCat(c.id)}>
+          {CATS.map((c) => (
+            <button
+              key={c.id}
+              className={`sn-cat${cat === c.id ? " sn-cat-on" : ""}`}
+              onClick={() => setCat(c.id)}
+            >
               <c.Icon size={13} /> {c.label}
             </button>
           ))}
-          <button className="sn-cat sn-cat-refresh" onClick={load} title="Refresh">
-            <FiRefreshCw size={13} style={loading ? { animation: "snSpin .8s linear infinite" } : {}} />
+          <button
+            className="sn-cat sn-cat-refresh"
+            onClick={load}
+            title="Refresh"
+          >
+            <FiRefreshCw
+              size={13}
+              style={loading ? { animation: "snSpin .8s linear infinite" } : {}}
+            />
           </button>
         </div>
 
@@ -616,19 +1076,51 @@ function Products() {
               <div key={i} className="sn-pcard sn-pcard-sk">
                 <div className="sn-pimg-wrap sn-sk" style={{ height: 180 }} />
                 <div className="sn-pbody">
-                  <div className="sn-sk" style={{ height: 11, width: "72%", borderRadius: 4, marginBottom: 6 }} />
-                  <div className="sn-sk" style={{ height: 9, width: "55%", borderRadius: 4, marginBottom: 8 }} />
-                  <div className="sn-sk" style={{ height: 15, width: "45%", borderRadius: 4, marginBottom: 10 }} />
-                  <div className="sn-sk" style={{ height: 36, width: "100%", borderRadius: 8 }} />
+                  <div
+                    className="sn-sk"
+                    style={{
+                      height: 11,
+                      width: "72%",
+                      borderRadius: 4,
+                      marginBottom: 6,
+                    }}
+                  />
+                  <div
+                    className="sn-sk"
+                    style={{
+                      height: 9,
+                      width: "55%",
+                      borderRadius: 4,
+                      marginBottom: 8,
+                    }}
+                  />
+                  <div
+                    className="sn-sk"
+                    style={{
+                      height: 15,
+                      width: "45%",
+                      borderRadius: 4,
+                      marginBottom: 10,
+                    }}
+                  />
+                  <div
+                    className="sn-sk"
+                    style={{ height: 36, width: "100%", borderRadius: 8 }}
+                  />
                 </div>
               </div>
             ))}
           </div>
         ) : shown.length === 0 ? (
-          <div className="sn-empty"><FiPackage size={40} color="#333" /><p>No products in this category yet.</p></div>
+          <div className="sn-empty">
+            <FiPackage size={40} color="#333" />
+            <p>No products in this category yet.</p>
+          </div>
         ) : (
           <div className="sn-pgrid">
-            {shown.map((p, i) => <ProductCard key={p.id} p={p} onBuy={setPopup} index={i} />)}
+            {shown.map((p, i) => (
+              <ProductCard key={p.id} p={p} onBuy={setPopup} index={i} />
+            ))}
           </div>
         )}
       </div>
@@ -643,25 +1135,58 @@ function Products() {
 function HowItWorks() {
   const { ref, v } = use3DInView();
   const steps = [
-    { Icon: FiShoppingCart, n: "1. Order",   desc: "Browse products and place your order with one tap." },
-    { Icon: FiMapPin,        n: "2. Track",   desc: "Track your rider live on the map in real-time." },
-    { Icon: BsBoxSeam,       n: "3. Receive", desc: "Your order arrives fast — right at your door." },
+    {
+      Icon: FiShoppingCart,
+      n: "1. Order",
+      desc: "Browse products and place your order with one tap.",
+    },
+    {
+      Icon: FiMapPin,
+      n: "2. Track",
+      desc: "Track your rider live on the map in real-time.",
+    },
+    {
+      Icon: BsBoxSeam,
+      n: "3. Receive",
+      desc: "Your order arrives fast — right at your door.",
+    },
   ];
   return (
-    <section id="sn-how" className="sn-section sn-sec-dark sn-3d-section" ref={ref as any}>
+    <section
+      id="sn-how"
+      className="sn-section sn-sec-dark sn-3d-section"
+      ref={ref as any}
+    >
       <div className="sn-wrap">
-        <h2 className={`sn-sec-h2 sn-center sn-3d-title${v ? " sn-3d-visible" : ""}`}>How it Works</h2>
+        <h2
+          className={`sn-sec-h2 sn-center sn-3d-title${v ? " sn-3d-visible" : ""}`}
+        >
+          How it Works
+        </h2>
         <div className="sn-steps-row">
           {steps.map((s, i) => (
-            <div key={i} className={`sn-step${v ? " sn-visible" : ""}`} style={{ "--vd": `${i * .15}s` } as any}>
-              <div className="sn-step-ico"><s.Icon size={30} color={ORANGE} /></div>
+            <div
+              key={i}
+              className={`sn-step${v ? " sn-visible" : ""}`}
+              style={{ "--vd": `${i * 0.15}s` } as any}
+            >
+              <div className="sn-step-ico">
+                <s.Icon size={30} color={ORANGE} />
+              </div>
               <div className="sn-step-n">{s.n}</div>
               <div className="sn-step-desc">{s.desc}</div>
             </div>
           ))}
         </div>
         <div className="sn-browse-btn-wrap">
-          <button className="sn-btn-browse" onClick={() => document.getElementById("sn-products")?.scrollIntoView({ behavior: "smooth" })}>
+          <button
+            className="sn-btn-browse"
+            onClick={() =>
+              document
+                .getElementById("sn-products")
+                ?.scrollIntoView({ behavior: "smooth" })
+            }
+          >
             Browse All Categories
           </button>
         </div>
@@ -681,22 +1206,57 @@ function BecomeVendor() {
       <div className="sn-wrap">
         <div className={`sn-vendor-card${v ? " sn-visible" : ""}`}>
           <div className="sn-vendor-text">
-            <h2 className="sn-vendor-h">Become a<br /><span style={{ color: ORANGE }}>Swift9ja</span> Vendor</h2>
-            <p className="sn-vendor-p">Reach millions of customers, manage your store with ease, and scale your business.</p>
+            <h2 className="sn-vendor-h">
+              Become a<br />
+              <span style={{ color: ORANGE }}>Swift9ja</span> Vendor
+            </h2>
+            <p className="sn-vendor-p">
+              Reach millions of customers, manage your store with ease, and
+              scale your business.
+            </p>
             <div className="sn-vendor-btns">
-              <button className="sn-btn-primary sn-btn-3d" onClick={() => nav("/vendor/register")}>Sign Up as a Vendor</button>
-              <button className="sn-btn-ghost"   onClick={() => nav("/about/company")}>Learn More</button>
+              <button
+                className="sn-btn-primary sn-btn-3d"
+                onClick={() => nav("/vendor/register")}
+              >
+                Sign Up as a Vendor
+              </button>
+              <button
+                className="sn-btn-ghost"
+                onClick={() => nav("/about/company")}
+              >
+                Learn More
+              </button>
             </div>
             <div className="sn-vendor-features">
-              <div className="sn-vf"><FiGrid size={14} color={ORANGE} /><div><div className="sn-vft">Order Management Dashboard</div></div></div>
-              <div className="sn-vf"><FiZap size={14} color={ORANGE} /><div><div className="sn-vft">Easy Payments</div></div></div>
-              <div className="sn-vf"><FiAward size={14} color={ORANGE} /><div><div className="sn-vft">Promotional Tools</div></div></div>
+              <div className="sn-vf">
+                <FiGrid size={14} color={ORANGE} />
+                <div>
+                  <div className="sn-vft">Order Management Dashboard</div>
+                </div>
+              </div>
+              <div className="sn-vf">
+                <FiZap size={14} color={ORANGE} />
+                <div>
+                  <div className="sn-vft">Easy Payments</div>
+                </div>
+              </div>
+              <div className="sn-vf">
+                <FiAward size={14} color={ORANGE} />
+                <div>
+                  <div className="sn-vft">Promotional Tools</div>
+                </div>
+              </div>
             </div>
           </div>
           <div className="sn-vendor-art">
             <div className="sn-vendor-art-inner">
               <div className="sn-vendor-art-badge">VENDOR</div>
-              <RiStore2Line size={90} color={ORANGE} className="sn-vendor-icon" />
+              <RiStore2Line
+                size={90}
+                color={ORANGE}
+                className="sn-vendor-icon"
+              />
               <div className="sn-vendor-tagline">Join 10,000+ vendors</div>
             </div>
           </div>
@@ -719,28 +1279,46 @@ function BecomeRider() {
           <div className="sn-rider-art">
             <div className="sn-rider-art-inner">
               <div className="sn-rider-art-badge">RIDER</div>
-              <RiMotorbikeFill size={90} color={ORANGE} className="sn-rider-icon" />
+              <RiMotorbikeFill
+                size={90}
+                color={ORANGE}
+                className="sn-rider-icon"
+              />
               <div className="sn-rider-tagline">500+ active riders</div>
             </div>
           </div>
           <div className="sn-rider-text">
-            <h2 className="sn-rider-h">Ride with<br /><span style={{ color: ORANGE }}>Swift9ja</span></h2>
-            <p className="sn-rider-p">Join 500+ riders making real money across Lagos every day.</p>
+            <h2 className="sn-rider-h">
+              Ride with
+              <br />
+              <span style={{ color: ORANGE }}>Swift9ja</span>
+            </h2>
+            <p className="sn-rider-p">
+              Join 500+ riders making real money across Lagos every day.
+            </p>
             <div className="sn-rider-perks">
               {[
-                { Icon: FiZap,    t: "Instant payouts" },
-                { Icon: FiClock,  t: "Flexible hours" },
+                { Icon: FiZap, t: "Instant payouts" },
+                { Icon: FiClock, t: "Flexible hours" },
                 { Icon: FiShield, t: "Rider insurance" },
-                { Icon: FiUsers,  t: "24/7 support" },
+                { Icon: FiUsers, t: "24/7 support" },
               ].map((p, i) => (
-                <div key={i} className="sn-rperk"><p.Icon size={13} color={ORANGE} /> {p.t}</div>
+                <div key={i} className="sn-rperk">
+                  <p.Icon size={13} color={ORANGE} /> {p.t}
+                </div>
               ))}
             </div>
             <div className="sn-rider-btns">
-              <button className="sn-btn-primary sn-btn-3d" onClick={() => nav("/rider/signup")}>
+              <button
+                className="sn-btn-primary sn-btn-3d"
+                onClick={() => nav("/rider/signup")}
+              >
                 Become a Rider <RiMotorbikeFill size={14} />
               </button>
-              <button className="sn-btn-ghost" onClick={() => nav("/rider/login")}>
+              <button
+                className="sn-btn-ghost"
+                onClick={() => nav("/rider/login")}
+              >
                 Already a rider? Login
               </button>
             </div>
@@ -758,23 +1336,37 @@ function Services() {
   const nav = useNavigate();
   const { ref, v } = use3DInView();
   const svcs = [
-    { Icon: MdRestaurant,        title: "Food Delivery",     color: "#ef4444" },
-    { Icon: MdLocalPharmacy,     title: "Pharmacy",          color: "#3b82f6" },
-    { Icon: MdLocalGroceryStore, title: "Groceries",         color: "#10B981" },
-    { Icon: MdDirectionsBike,    title: "Send & Pickup",     color: "#8b5cf6" },
-    { Icon: MdStorefront,        title: "Fashion",           color: "#f59e0b" },
-    { Icon: BsBoxSeam,           title: "Beauty & Skincare", color: "#ec4899" },
+    { Icon: MdRestaurant, title: "Food Delivery", color: "#ef4444" },
+    { Icon: MdLocalPharmacy, title: "Pharmacy", color: "#3b82f6" },
+    { Icon: MdLocalGroceryStore, title: "Groceries", color: "#10B981" },
+    { Icon: MdDirectionsBike, title: "Send & Pickup", color: "#8b5cf6" },
+    { Icon: MdStorefront, title: "Fashion", color: "#f59e0b" },
+    { Icon: BsBoxSeam, title: "Beauty & Skincare", color: "#ec4899" },
   ];
   return (
-    <section id="sn-services" className="sn-section sn-3d-section" ref={ref as any}>
+    <section
+      id="sn-services"
+      className="sn-section sn-3d-section"
+      ref={ref as any}
+    >
       <div className="sn-wrap">
-        <h2 className={`sn-sec-h2 sn-center sn-3d-title${v ? " sn-3d-visible" : ""}`}>What We Deliver</h2>
+        <h2
+          className={`sn-sec-h2 sn-center sn-3d-title${v ? " sn-3d-visible" : ""}`}
+        >
+          What We Deliver
+        </h2>
         <div className="sn-svc-grid">
           {svcs.map((s, i) => (
-            <div key={i} className={`sn-svc${v ? " sn-visible" : ""}`}
-              style={{ "--vd": `${i * .07}s`, "--sc": s.color } as any}
-              onClick={() => nav("/services")}>
-              <div className="sn-svc-ico" style={{ background: `${s.color}18` }}>
+            <div
+              key={i}
+              className={`sn-svc${v ? " sn-visible" : ""}`}
+              style={{ "--vd": `${i * 0.07}s`, "--sc": s.color } as any}
+              onClick={() => nav("/services")}
+            >
+              <div
+                className="sn-svc-ico"
+                style={{ background: `${s.color}18` }}
+              >
                 <s.Icon size={32} color={s.color} />
               </div>
               <div className="sn-svc-title">{s.title}</div>
@@ -793,40 +1385,92 @@ function About() {
   const nav = useNavigate();
   const { ref, v } = use3DInView();
   return (
-    <section id="sn-about" className="sn-section sn-sec-dark sn-3d-section" ref={ref as any}>
+    <section
+      id="sn-about"
+      className="sn-section sn-sec-dark sn-3d-section"
+      ref={ref as any}
+    >
       <div className="sn-wrap">
         <div className="sn-about-grid">
           <div className={`sn-about-l${v ? " sn-visible" : ""}`}>
             <span className="sn-kicker">About SwiftNija</span>
             <h2 className="sn-sec-h2" style={{ textAlign: "left" }}>
-              Built for Lagos.<br /><span style={{ color: ORANGE }}>Powered by Speed.</span>
+              Built for Lagos.
+              <br />
+              <span style={{ color: ORANGE }}>Powered by Speed.</span>
             </h2>
             <p className="sn-about-p">
-              SwiftNija is a flagship product of <strong style={{ color: ORANGE }}>Verapixels</strong> — a digital innovation company founded by <strong>Ocholi Divine</strong> in 2025.
+              SwiftNija is a flagship product of{" "}
+              <strong style={{ color: ORANGE }}>Verapixels</strong> — a digital
+              innovation company founded by <strong>Ocholi Divine</strong> in
+              2025.
             </p>
             <blockquote className="sn-quote">
-              "When every pixel is in its perfect place, the experience becomes invisible — it just works."
+              "When every pixel is in its perfect place, the experience becomes
+              invisible — it just works."
               <cite>— Ocholi Divine, Founder & CEO, Verapixels</cite>
             </blockquote>
             <div className="sn-about-btns">
-              <button className="sn-btn-primary sn-btn-3d" onClick={() => nav("/about/founder")}>Meet the Founder <FiArrowRight size={14} /></button>
-              <button className="sn-btn-ghost"   onClick={() => nav("/about/company")}>Our Full Story</button>
+              <button
+                className="sn-btn-primary sn-btn-3d"
+                onClick={() => nav("/about/founder")}
+              >
+                Meet the Founder <FiArrowRight size={14} />
+              </button>
+              <button
+                className="sn-btn-ghost"
+                onClick={() => nav("/about/company")}
+              >
+                Our Full Story
+              </button>
             </div>
           </div>
-          <div className={`sn-about-r${v ? " sn-visible" : ""}`} style={{ "--vd": ".13s" } as any}>
+          <div
+            className={`sn-about-r${v ? " sn-visible" : ""}`}
+            style={{ "--vd": ".13s" } as any}
+          >
             <div className="sn-about-visual">
               <div className="sn-av-top">
                 {/* SVG logo replacing the PNG img */}
                 <LogoSVG size={32} />
-                <div><div className="sn-av-name">SwiftNija</div><div className="sn-av-sub">by Verapixels</div></div>
+                <div>
+                  <div className="sn-av-name">SwiftNija</div>
+                  <div className="sn-av-sub">by Verapixels</div>
+                </div>
               </div>
               <div className="sn-av-art">
-                <MdDeliveryDining size={80} color={ORANGE} style={{ filter: `drop-shadow(0 4px 16px ${ORANGE}66)`, animation: "riderBob 3s ease-in-out infinite" }} />
-                <div style={{ fontSize: 11, color: ORANGE, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", marginTop: 8 }}>Delivering across Lagos</div>
+                <MdDeliveryDining
+                  size={80}
+                  color={ORANGE}
+                  style={{
+                    filter: `drop-shadow(0 4px 16px ${ORANGE}66)`,
+                    animation: "riderBob 3s ease-in-out infinite",
+                  }}
+                />
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: ORANGE,
+                    fontWeight: 700,
+                    letterSpacing: 1,
+                    textTransform: "uppercase",
+                    marginTop: 8,
+                  }}
+                >
+                  Delivering across Lagos
+                </div>
               </div>
               <div className="sn-av-stats">
-                {[["50k+","Orders"],["500+","Riders"],["4.9★","Rating"],["15m","Avg"]].map(([n,l],i) => (
-                  <div key={i} className="sn-av-stat"><div className="sn-av-sn">{n}</div><div className="sn-av-sl">{l}</div></div>
+                {[
+                  ["50k+", "Orders"],
+                  ["500+", "Riders"],
+                  ["4.9★", "Rating"],
+                  ["15m", "Avg"],
+                ].map(([n, l], i) => (
+                  <div key={i} className="sn-av-stat">
+                    <div className="sn-av-sn">{n}</div>
+                    <div className="sn-av-sl">{l}</div>
+                  </div>
                 ))}
               </div>
             </div>
@@ -843,18 +1487,55 @@ function About() {
 function Contact() {
   const { ref, v } = use3DInView();
   return (
-    <section id="sn-contact" className="sn-section sn-3d-section" ref={ref as any}>
+    <section
+      id="sn-contact"
+      className="sn-section sn-3d-section"
+      ref={ref as any}
+    >
       <div className="sn-wrap">
-        <h2 className={`sn-sec-h2 sn-center sn-3d-title${v ? " sn-3d-visible" : ""}`}>We're Always Here for You.</h2>
+        <h2
+          className={`sn-sec-h2 sn-center sn-3d-title${v ? " sn-3d-visible" : ""}`}
+        >
+          We're Always Here for You.
+        </h2>
         <div className="sn-contact-grid">
           {[
-            { Icon: FiPhone,  label: "Call Us",  val: "+234 800 SWIFT NJ",        color: ORANGE },
-            { Icon: FiMail,   label: "Email",    val: "info.verapixels@gmail.com", color: "#3b82f6" },
-            { Icon: FiMapPin, label: "Location", val: "Lagos, Nigeria",            color: "#10B981" },
-            { Icon: FiUsers,  label: "Support",  val: "24/7 Live Chat",            color: "#8b5cf6" },
+            {
+              Icon: FiPhone,
+              label: "Call Us",
+              val: "+234 800 SWIFT NJ",
+              color: ORANGE,
+            },
+            {
+              Icon: FiMail,
+              label: "Email",
+              val: "info.verapixels@gmail.com",
+              color: "#3b82f6",
+            },
+            {
+              Icon: FiMapPin,
+              label: "Location",
+              val: "Lagos, Nigeria",
+              color: "#10B981",
+            },
+            {
+              Icon: FiUsers,
+              label: "Support",
+              val: "24/7 Live Chat",
+              color: "#8b5cf6",
+            },
           ].map((c, i) => (
-            <div key={i} className={`sn-ccard${v ? " sn-visible" : ""}`} style={{ "--vd": `${i * .07}s` } as any}>
-              <div className="sn-cico" style={{ background: `${c.color}15`, color: c.color }}><c.Icon size={22} /></div>
+            <div
+              key={i}
+              className={`sn-ccard${v ? " sn-visible" : ""}`}
+              style={{ "--vd": `${i * 0.07}s` } as any}
+            >
+              <div
+                className="sn-cico"
+                style={{ background: `${c.color}15`, color: c.color }}
+              >
+                <c.Icon size={22} />
+              </div>
               <div className="sn-clbl">{c.label}</div>
               <div className="sn-cval">{c.val}</div>
             </div>
@@ -878,34 +1559,86 @@ function Footer() {
             {/* Logo: SVG icon + text, no PNG img */}
             <div className="sn-logo" style={{ marginBottom: 10 }}>
               <LogoSVG size={36} />
-              <span className="sn-logo-text">Swift<em>9ja</em></span>
+              <span className="sn-logo-text">
+                Swift<em>9ja</em>
+              </span>
             </div>
-            <p className="sn-ftag">Lagos's fastest on-demand delivery platform. A product of Verapixels by Ocholi Divine.</p>
+            <p className="sn-ftag">
+              Lagos's fastest on-demand delivery platform. A product of
+              Verapixels by Ocholi Divine.
+            </p>
             <div className="sn-social">
-              {[FiInstagram, FiTwitter, FiFacebook, FiLinkedin].map((Icon, i) => (
-                <a key={i} href="#" className="sn-social-btn"><Icon size={15} /></a>
-              ))}
+              {[FiInstagram, FiTwitter, FiFacebook, FiLinkedin].map(
+                (Icon, i) => (
+                  <a key={i} href="#" className="sn-social-btn">
+                    <Icon size={15} />
+                  </a>
+                ),
+              )}
             </div>
           </div>
           {[
-            { t: "Company",  links: [["About Founder", "/about/founder"], ["Meet the Team", "/about/team"], ["About Company", "/about/company"]] },
-            { t: "Services", links: [["Food Delivery", "/services"], ["Pharmacy", "/services"], ["Groceries", "/services"]] },
-            { t: "Partners", links: [["Become a Rider", "/rider/signup"], ["Become a Vendor", "/vendor/register"], ["Rider Login", "/rider/login"], ["Vendor Login", "/vendor/login"]] },
-            { t: "Support",  links: [["Help Center", "#sn-contact"], ["Contact Us", "#sn-contact"], ["Privacy Policy", "#"], ["Terms", "#"]] },
+            {
+              t: "Company",
+              links: [
+                ["About Founder", "/about/founder"],
+                ["Meet the Team", "/about/team"],
+                ["About Company", "/about/company"],
+              ],
+            },
+            {
+              t: "Services",
+              links: [
+                ["Food Delivery", "/services"],
+                ["Pharmacy", "/services"],
+                ["Groceries", "/services"],
+              ],
+            },
+            {
+              t: "Partners",
+              links: [
+                ["Become a Rider", "/rider/signup"],
+                ["Become a Vendor", "/vendor/register"],
+                ["Rider Login", "/rider/login"],
+                ["Vendor Login", "/vendor/login"],
+              ],
+            },
+            {
+              t: "Support",
+              links: [
+                ["Help Center", "#sn-contact"],
+                ["Contact Us", "#sn-contact"],
+                ["Privacy Policy", "#"],
+                ["Terms", "#"],
+              ],
+            },
           ].map((col, ci) => (
             <div key={ci} className="sn-fcol">
               <div className="sn-fttl">{col.t}</div>
               {col.links.map(([lb, hr], li) => (
-                <button key={li} className="sn-flink" onClick={() => {
-                  if (hr.startsWith("/")) nav(hr);
-                  else document.getElementById(hr.slice(1))?.scrollIntoView({ behavior: "smooth" });
-                }}>{lb}</button>
+                <button
+                  key={li}
+                  className="sn-flink"
+                  onClick={() => {
+                    if (hr.startsWith("/")) nav(hr);
+                    else
+                      document
+                        .getElementById(hr.slice(1))
+                        ?.scrollIntoView({ behavior: "smooth" });
+                  }}
+                >
+                  {lb}
+                </button>
               ))}
             </div>
           ))}
         </div>
         <div className="sn-footer-btm">
-          <span>© 2026 SwiftNija by <span style={{ color: ORANGE }}>Verapixels</span>. All rights reserved.</span>
+          <span>
+            © 2026 SwiftNija by{" "}
+            <span style={{ color: ORANGE }}>Verapixels</span>. All rights
+            reserved.
+          </span>
           <span>Crafted with precision in Lagos, Nigeria</span>
         </div>
       </div>
